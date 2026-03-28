@@ -404,75 +404,73 @@
         </div>
 
         <!-- All Time -->
-        <div id="card-alltime" class="bg-white dark:bg-gray-900 rounded-xl shadow-lg p-6 mb-4 border border-gray-200 dark:border-gray-700">
-                <button class="card-collapse-btn w-full flex items-center justify-between mb-4" data-card="alltime">
-                    <h2 class="text-xl font-semibold text-accent flex items-center gap-2 uppercase">
-                        <i class="fas fa-layer-group"></i> All Time
-                    </h2>
-                    <i id="chevron-alltime" class="fas fa-chevron-down text-gray-400 transition-transform duration-200"></i>
+        <div id="card-alltime" class="bg-white dark:bg-gray-800 rounded-xl shadow p-3 mb-4 border border-gray-200 dark:border-gray-600">
+                <button class="card-collapse-btn w-full flex items-center justify-between mb-2" data-card="alltime">
+                    <div class="text-xs font-bold text-gray-400 uppercase tracking-widest">All Time</div>
+                    <i id="chevron-alltime" class="fas fa-chevron-down text-gray-400 text-xs transition-transform duration-200"></i>
                 </button>
-                <div id="body-alltime" class="space-y-3">
-                    <div class="flex items-center justify-between">
-                        <span class="flex items-center gap-2 text-sporty"><i class="fas fa-road"></i> Distance</span>
-                        <span class="font-bold text-lg"><span id="cumDistance">0.0</span> <span class="text-gray-400 text-sm font-normal">km</span></span>
+                <div id="body-alltime" class="space-y-1.5 text-sm">
+                    <div class="flex justify-between items-center">
+                        <span class="flex items-center gap-1 text-sporty"><i class="fas fa-road text-xs"></i> Distance</span>
+                        <span class="font-bold"><span id="cumDistance">0.0</span> <span class="text-gray-400 text-xs font-normal">km</span></span>
                     </div>
-                    <div class="flex items-center justify-between">
-                        <span class="flex items-center gap-2 text-accent"><i class="fas fa-fire"></i> Calories</span>
-                        <span class="font-bold text-lg"><span id="cumCalories">0</span> <span class="text-gray-400 text-sm font-normal">kcal</span></span>
+                    <div class="flex justify-between items-center">
+                        <span class="flex items-center gap-1 text-accent"><i class="fas fa-fire text-xs"></i> Calories</span>
+                        <span class="font-bold"><span id="cumCalories">0</span> <span class="text-gray-400 text-xs font-normal">kcal</span></span>
                     </div>
-                    <div class="flex items-center justify-between">
-                        <span class="flex items-center gap-2 text-yellow-400"><i class="fas fa-clock"></i> Time</span>
-                        <span class="font-bold text-lg"><span id="cumTime">00:00:00</span></span>
+                    <div class="flex justify-between items-center">
+                        <span class="flex items-center gap-1 text-yellow-400"><i class="fas fa-clock text-xs"></i> Time</span>
+                        <span class="font-bold"><span id="cumTime">00:00:00</span></span>
                     </div>
-                    <div class="flex items-center justify-between">
-                        <span class="flex items-center gap-2 text-green-400"><i class="fas fa-bolt"></i> Max Speed</span>
-                        <span class="font-bold text-lg"><span id="cumMaxSpeed">0.0</span> <span class="text-gray-400 text-sm font-normal">km/h</span></span>
+                    <div class="flex justify-between items-center">
+                        <span class="flex items-center gap-1 text-green-400"><i class="fas fa-bolt text-xs"></i> Max Speed</span>
+                        <span class="font-bold"><span id="cumMaxSpeed">0.0</span> <span class="text-gray-400 text-xs font-normal">km/h</span></span>
                     </div>
-                    <div class="flex items-center justify-between">
-                        <span class="flex items-center gap-2 text-blue-400"><i class="fas fa-chart-line"></i> Avg Speed</span>
-                        <span class="font-bold text-lg"><span id="cumAvgSpeed">0.00</span> <span class="text-gray-400 text-sm font-normal">km/h</span></span>
+                    <div class="flex justify-between items-center">
+                        <span class="flex items-center gap-1 text-blue-400"><i class="fas fa-chart-line text-xs"></i> Avg Speed</span>
+                        <span class="font-bold"><span id="cumAvgSpeed">0.00</span> <span class="text-gray-400 text-xs font-normal">km/h</span></span>
+                    </div>
+                    <div class="flex justify-between items-center">
+                        <span class="flex items-center gap-1 text-orange-400"><i class="fas fa-trophy text-xs"></i> Best Day</span>
+                        <span class="font-bold"><span id="allTimeBestDay">—</span></span>
+                    </div>
+                    <div class="flex justify-between items-center">
+                        <span class="flex items-center gap-1 text-purple-400"><i class="fas fa-list-ol text-xs"></i> Total Sessions</span>
+                        <span class="font-bold"><span id="allTimeTotalSessions">0</span></span>
                     </div>
                     <!-- Collapsible extra stats -->
-                    <div id="cumMoreStats" class="hidden space-y-3">
-                        <div class="flex items-center justify-between">
-                            <span class="flex items-center gap-2 text-yellow-400"><i class="fas fa-pause-circle"></i> Pauses</span>
-                            <span class="font-bold text-lg"><span id="cumPauseCount">0</span></span>
+                    <div id="cumMoreStats" class="hidden space-y-1.5">
+                        <div class="flex justify-between items-center">
+                            <span class="flex items-center gap-1 text-yellow-400"><i class="fas fa-pause-circle text-xs"></i> Pauses</span>
+                            <span class="font-bold"><span id="cumPauseCount">0</span></span>
                         </div>
-                        <div class="flex items-center justify-between">
-                            <span class="flex items-center gap-2 text-accent"><i class="fas fa-hourglass-half"></i> Pause Time</span>
-                            <span class="font-bold text-lg"><span id="cumTotalPauseTime">00:00</span></span>
+                        <div class="flex justify-between items-center">
+                            <span class="flex items-center gap-1 text-accent"><i class="fas fa-hourglass-half text-xs"></i> Pause Time</span>
+                            <span class="font-bold"><span id="cumTotalPauseTime">00:00</span></span>
                         </div>
-                        <div class="flex items-center justify-between">
-                            <span class="flex items-center gap-2 text-accent"><i class="fas fa-hourglass-end"></i> Avg Pause</span>
-                            <span class="font-bold text-lg"><span id="cumAvgPauseTime">00:00</span></span>
+                        <div class="flex justify-between items-center">
+                            <span class="flex items-center gap-1 text-accent"><i class="fas fa-hourglass-end text-xs"></i> Avg Pause</span>
+                            <span class="font-bold"><span id="cumAvgPauseTime">00:00</span></span>
                         </div>
-                        <div class="flex items-center justify-between">
-                            <span class="flex items-center gap-2 text-accent"><i class="fas fa-plug"></i> Power</span>
-                            <span class="font-bold text-lg"><span id="cumPower">0</span> <span class="text-gray-400 text-sm font-normal">W</span></span>
+                        <div class="flex justify-between items-center">
+                            <span class="flex items-center gap-1 text-accent"><i class="fas fa-plug text-xs"></i> Power</span>
+                            <span class="font-bold"><span id="cumPower">0</span> <span class="text-gray-400 text-xs font-normal">W</span></span>
                         </div>
-                        <div class="flex items-center justify-between">
-                            <span class="flex items-center gap-2 text-accent"><i class="fas fa-battery-full"></i> Total Energy</span>
-                            <span class="font-bold text-lg"><span id="cumTotalPower">0</span> <span class="text-gray-400 text-sm font-normal">J</span></span>
+                        <div class="flex justify-between items-center">
+                            <span class="flex items-center gap-1 text-accent"><i class="fas fa-battery-full text-xs"></i> Total Energy</span>
+                            <span class="font-bold"><span id="cumTotalPower">0</span> <span class="text-gray-400 text-xs font-normal">J</span></span>
                         </div>
-                        <div class="flex items-center justify-between">
-                            <span class="flex items-center gap-2 text-sporty"><i class="fas fa-shoe-prints"></i> Steps</span>
-                            <span class="font-bold text-lg"><span id="cumSteps">0</span></span>
+                        <div class="flex justify-between items-center">
+                            <span class="flex items-center gap-1 text-sporty"><i class="fas fa-shoe-prints text-xs"></i> Steps</span>
+                            <span class="font-bold"><span id="cumSteps">0</span></span>
                         </div>
-                        <div class="flex items-center justify-between">
-                            <span class="flex items-center gap-2 text-sporty"><i class="fas fa-ruler"></i> Est. Distance</span>
-                            <span class="font-bold text-lg"><span id="cumEstimatedDistance">0.00</span> <span class="text-gray-400 text-sm font-normal">km</span></span>
+                        <div class="flex justify-between items-center">
+                            <span class="flex items-center gap-1 text-sporty"><i class="fas fa-ruler text-xs"></i> Est. Distance</span>
+                            <span class="font-bold"><span id="cumEstimatedDistance">0.00</span> <span class="text-gray-400 text-xs font-normal">km</span></span>
                         </div>
-                    </div>
-                    <div class="flex items-center justify-between">
-                        <span class="flex items-center gap-2 text-orange-400"><i class="fas fa-trophy"></i> Best Day</span>
-                        <span class="font-bold text-lg"><span id="allTimeBestDay">—</span></span>
-                    </div>
-                    <div class="flex items-center justify-between">
-                        <span class="flex items-center gap-2 text-purple-400"><i class="fas fa-list-ol"></i> Total Sessions</span>
-                        <span class="font-bold text-lg"><span id="allTimeTotalSessions">0</span></span>
                     </div>
                     <button id="cumMoreBtn" onclick="toggleTotalsMore()"
-                        class="w-full text-xs text-gray-400 hover:text-sporty pt-2 flex items-center justify-center gap-1">
+                        class="w-full text-xs text-gray-400 hover:text-sporty pt-1 flex items-center justify-center gap-1">
                         <i id="cumMoreChevron" class="fas fa-chevron-down transition-transform duration-200"></i>
                         <span id="cumMoreLabel">Show more</span>
                     </button>
@@ -480,15 +478,13 @@
         </div>
 
         <!-- Live Speed Chart -->
-        <div id="card-livespeed" class="bg-white dark:bg-gray-900 rounded-xl shadow-lg mb-4 border border-gray-200 dark:border-gray-700">
+        <div id="card-livespeed" class="bg-white dark:bg-gray-800 rounded-xl shadow p-3 mb-4 border border-gray-200 dark:border-gray-600">
             <button onclick="toggleSection('liveSpeedContent', 'liveSpeedChevron')"
-                class="w-full flex items-center justify-between px-6 py-4">
-                <h2 class="text-xl font-semibold text-sporty flex items-center gap-2 uppercase">
-                    <i class="fas fa-wave-square"></i> Live Speed
-                </h2>
-                <i id="liveSpeedChevron" class="fas fa-chevron-down text-gray-400 transition-transform duration-200"></i>
+                class="w-full flex items-center justify-between mb-2">
+                <div class="text-xs font-bold text-gray-400 uppercase tracking-widest">Live Speed</div>
+                <i id="liveSpeedChevron" class="fas fa-chevron-down text-gray-400 text-xs transition-transform duration-200"></i>
             </button>
-            <div id="liveSpeedContent" class="px-6 pb-6">
+            <div id="liveSpeedContent" class="pb-1">
                 <div class="flex flex-col gap-2 mb-4">
                     <div class="flex items-center gap-1.5 flex-wrap">
                         <span class="text-xs text-gray-400 w-14 shrink-0">Window</span>
@@ -513,15 +509,13 @@
         </div>
 
         <!-- Daily Trends -->
-        <div id="card-trends" class="bg-white dark:bg-gray-900 rounded-xl shadow-lg mb-4 border border-gray-200 dark:border-gray-700">
+        <div id="card-trends" class="bg-white dark:bg-gray-800 rounded-xl shadow p-3 mb-4 border border-gray-200 dark:border-gray-600">
             <button onclick="toggleSection('historyChartsContent', 'historyChartsChevron')"
-                class="w-full flex items-center justify-between px-6 py-4">
-                <h2 class="text-xl font-semibold text-accent flex items-center gap-2 uppercase">
-                    <i class="fas fa-chart-area"></i> Daily Trends
-                </h2>
-                <i id="historyChartsChevron" class="fas fa-chevron-down text-gray-400 transition-transform duration-200"></i>
+                class="w-full flex items-center justify-between mb-2">
+                <div class="text-xs font-bold text-gray-400 uppercase tracking-widest">Daily Trends</div>
+                <i id="historyChartsChevron" class="fas fa-chevron-down text-gray-400 text-xs transition-transform duration-200"></i>
             </button>
-            <div id="historyChartsContent" class="px-6 pb-6">
+            <div id="historyChartsContent" class="pb-1">
                 <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div>
                         <h3 class="text-sm font-semibold text-sporty mb-2 uppercase text-center">Distance (km)</h3>
@@ -540,21 +534,19 @@
         </div>
 
         <!-- Session History Table -->
-        <div id="card-history" class="bg-white dark:bg-gray-900 rounded-xl shadow-lg mb-4 border border-gray-200 dark:border-gray-700">
-            <div class="flex items-center justify-between px-6 py-4">
+        <div id="card-history" class="bg-white dark:bg-gray-800 rounded-xl shadow p-3 mb-4 border border-gray-200 dark:border-gray-600">
+            <div class="flex items-center justify-between mb-2">
                 <button onclick="toggleSection('sessionHistoryContent', 'sessionHistoryChevron')"
-                    class="flex items-center gap-3 flex-1 text-left">
-                    <h2 class="text-xl font-semibold text-accent flex items-center gap-2 uppercase">
-                        <i class="fas fa-history"></i> Session History
-                    </h2>
-                    <i id="sessionHistoryChevron" class="fas fa-chevron-down text-gray-400 transition-transform duration-200"></i>
+                    class="flex items-center gap-2 flex-1 text-left">
+                    <div class="text-xs font-bold text-gray-400 uppercase tracking-widest">Session History</div>
+                    <i id="sessionHistoryChevron" class="fas fa-chevron-down text-gray-400 text-xs transition-transform duration-200"></i>
                 </button>
                 <button id="clearHistoryBtn"
-                    class="bg-red-600 hover:bg-red-700 text-white font-semibold py-1 px-3 rounded text-sm">
+                    class="bg-red-600 hover:bg-red-700 text-white font-semibold py-1 px-2 rounded text-xs">
                     <i class="fas fa-trash"></i> Clear
                 </button>
             </div>
-            <div id="sessionHistoryContent" class="px-6 pb-6">
+            <div id="sessionHistoryContent" class="pb-1">
                 <div class="overflow-x-auto">
                     <table class="w-full text-sm">
                         <thead>
