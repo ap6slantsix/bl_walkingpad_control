@@ -1366,7 +1366,10 @@ document.getElementById("preset55Btn").addEventListener("click", () => startAndS
 
 document.getElementById("exportBtn").addEventListener("click", exportStats);
 
-document.getElementById("setDefaultsBtn").addEventListener("click", saveDefaults);
+document.getElementById("setDefaultsBtn").addEventListener("click", () => {
+    saveDefaults();
+    document.getElementById("settingsModal").classList.add("hidden");
+});
 
 document.getElementById("settingsBtn").addEventListener("click", () => {
     document.getElementById("settingsModal").classList.remove("hidden");
@@ -1382,6 +1385,12 @@ document.getElementById("goalsBtn").addEventListener("click", () => {
 
 document.getElementById("closeGoalsBtn").addEventListener("click", () => {
     document.getElementById("goalsModal").classList.add("hidden");
+});
+
+["settingsModal", "goalsModal", "continueModal", "recoverModal"].forEach(id => {
+    document.getElementById(id).addEventListener("click", function (e) {
+        if (e.target === this) this.classList.add("hidden");
+    });
 });
 
 document.getElementById("copyForSheetsBtn").addEventListener("click", copyForSheets);
