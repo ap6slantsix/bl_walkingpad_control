@@ -87,11 +87,19 @@ let cardHidden = {};
 
 function applyCardCollapsed(id, collapsed) {
     const body = document.getElementById("body-" + id);
-    const chevronBtn = document.getElementById("chevron-" + id);
+    const chevronEl = document.getElementById("chevron-" + id);
     const titleEl = document.getElementById("title-" + id);
     if (!body) return;
     body.classList.toggle("hidden", collapsed);
-    if (chevronBtn) chevronBtn.classList.toggle("hidden", collapsed);
+    if (chevronEl) {
+        if (chevronEl.tagName === "BUTTON") {
+            // Period card corner button — hide when collapsed (title header takes over)
+            chevronEl.classList.toggle("hidden", collapsed);
+        } else {
+            // Regular card chevron icon — rotate to indicate state, never hide
+            chevronEl.classList.toggle("rotate-180", collapsed);
+        }
+    }
     if (titleEl) {
         titleEl.classList.toggle("hidden", !collapsed);
         titleEl.classList.toggle("flex", collapsed);
@@ -1387,7 +1395,7 @@ document.getElementById("closeGoalsBtn").addEventListener("click", () => {
     document.getElementById("goalsModal").classList.add("hidden");
 });
 
-["settingsModal", "goalsModal", "continueModal", "recoverModal"].forEach(id => {
+["settingsModal", "goalsModal", "continueModal", "recoverModal", "clearConfirmModal"].forEach(id => {
     document.getElementById(id).addEventListener("click", function (e) {
         if (e.target === this) this.classList.add("hidden");
     });
@@ -1542,9 +1550,24 @@ document.getElementById("recoverExportBtn").addEventListener("click", () => {
 });
 
 document.getElementById("clearHistoryBtn").addEventListener("click", () => {
+    document.getElementById("clearConfirmCheck").checked = false;
+    document.getElementById("clearConfirmOk").disabled = true;
+    document.getElementById("clearConfirmModal").classList.remove("hidden");
+});
+
+document.getElementById("clearConfirmCheck").addEventListener("change", function () {
+    document.getElementById("clearConfirmOk").disabled = !this.checked;
+});
+
+document.getElementById("clearConfirmOk").addEventListener("click", () => {
     localStorage.removeItem("wp_history");
+    document.getElementById("clearConfirmModal").classList.add("hidden");
     renderCharts();
     renderSessionHistory();
+});
+
+document.getElementById("clearConfirmCancel").addEventListener("click", () => {
+    document.getElementById("clearConfirmModal").classList.add("hidden");
 });
 
 document.getElementById("saveOnboardingBtn").addEventListener("click", saveOnboarding);
