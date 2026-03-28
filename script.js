@@ -113,7 +113,7 @@ function applyCardHidden(id, hidden) {
 function loadCardState() {
     cardCollapsed = JSON.parse(localStorage.getItem("wp_card_collapsed") || "{}");
     cardHidden = JSON.parse(localStorage.getItem("wp_card_hidden") || "{}");
-    ["session", "period1", "period2", "alltime"].forEach(id => {
+    ["session", "period1", "period2", "alltime", "livespeed", "trends", "history"].forEach(id => {
         applyCardCollapsed(id, cardCollapsed[id] || false);
         applyCardHidden(id, cardHidden[id] || false);
         const cb = document.getElementById("show-card-" + id);
@@ -122,7 +122,7 @@ function loadCardState() {
     document.querySelectorAll(".card-collapse-btn").forEach(btn => {
         btn.addEventListener("click", () => toggleCardCollapse(btn.dataset.card));
     });
-    ["session", "period1", "period2", "alltime"].forEach(id => {
+    ["session", "period1", "period2", "alltime", "livespeed", "trends", "history"].forEach(id => {
         const cb = document.getElementById("show-card-" + id);
         if (!cb) return;
         cb.addEventListener("change", function () {

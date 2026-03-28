@@ -480,7 +480,7 @@
         </div>
 
         <!-- Live Speed Chart -->
-        <div class="bg-white dark:bg-gray-900 rounded-xl shadow-lg mb-4 border border-gray-200 dark:border-gray-700">
+        <div id="card-livespeed" class="bg-white dark:bg-gray-900 rounded-xl shadow-lg mb-4 border border-gray-200 dark:border-gray-700">
             <button onclick="toggleSection('liveSpeedContent', 'liveSpeedChevron')"
                 class="w-full flex items-center justify-between px-6 py-4">
                 <h2 class="text-xl font-semibold text-sporty flex items-center gap-2 uppercase">
@@ -512,12 +512,12 @@
             </div>
         </div>
 
-        <!-- Historical Charts -->
-        <div class="bg-white dark:bg-gray-900 rounded-xl shadow-lg mb-4 border border-gray-200 dark:border-gray-700">
+        <!-- Daily Trends -->
+        <div id="card-trends" class="bg-white dark:bg-gray-900 rounded-xl shadow-lg mb-4 border border-gray-200 dark:border-gray-700">
             <button onclick="toggleSection('historyChartsContent', 'historyChartsChevron')"
                 class="w-full flex items-center justify-between px-6 py-4">
                 <h2 class="text-xl font-semibold text-accent flex items-center gap-2 uppercase">
-                    <i class="fas fa-chart-area"></i> History Charts
+                    <i class="fas fa-chart-area"></i> Daily Trends
                 </h2>
                 <i id="historyChartsChevron" class="fas fa-chevron-down text-gray-400 transition-transform duration-200"></i>
             </button>
@@ -540,7 +540,7 @@
         </div>
 
         <!-- Session History Table -->
-        <div class="bg-white dark:bg-gray-900 rounded-xl shadow-lg mb-4 border border-gray-200 dark:border-gray-700">
+        <div id="card-history" class="bg-white dark:bg-gray-900 rounded-xl shadow-lg mb-4 border border-gray-200 dark:border-gray-700">
             <div class="flex items-center justify-between px-6 py-4">
                 <button onclick="toggleSection('sessionHistoryContent', 'sessionHistoryChevron')"
                     class="flex items-center gap-3 flex-1 text-left">
@@ -744,7 +744,7 @@
                 <p class="text-xs text-gray-400 text-center">Google Apps Script, Zapier, n8n, etc.</p>
             </div>
             <div class="border-t border-gray-200 dark:border-gray-700 pt-3 mb-4">
-                <div class="text-xs font-bold text-gray-400 uppercase tracking-widest mb-2 text-center">Card Visibility</div>
+                <div class="text-xs font-bold text-gray-400 uppercase tracking-widest mb-2 text-center">Stats Visibility</div>
                 <div class="grid grid-cols-2 gap-x-4 gap-y-1.5 text-sm text-left px-2">
                     <label class="flex items-center gap-2 cursor-pointer">
                         <input type="checkbox" id="show-card-session" class="accent-sky-500" checked />
@@ -761,6 +761,18 @@
                     <label class="flex items-center gap-2 cursor-pointer">
                         <input type="checkbox" id="show-card-alltime" class="accent-sky-500" checked />
                         <span>All Time</span>
+                    </label>
+                    <label class="flex items-center gap-2 cursor-pointer">
+                        <input type="checkbox" id="show-card-livespeed" class="accent-sky-500" checked />
+                        <span>Live Speed</span>
+                    </label>
+                    <label class="flex items-center gap-2 cursor-pointer">
+                        <input type="checkbox" id="show-card-trends" class="accent-sky-500" checked />
+                        <span>Daily Trends</span>
+                    </label>
+                    <label class="flex items-center gap-2 cursor-pointer">
+                        <input type="checkbox" id="show-card-history" class="accent-sky-500" checked />
+                        <span>Session History</span>
                     </label>
                 </div>
             </div>
