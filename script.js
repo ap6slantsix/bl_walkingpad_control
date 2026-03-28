@@ -78,9 +78,19 @@ let estimatedDistanceKm = 0;
 let cumEstimatedDistance = 0;
 let lastDistanceUpdate = Date.now();
 
+// --- Export ---
+let webhookUrl = "";
+let webhookSecret = "";
+
 // --- Goals ---
 let goalDistanceKm = 0;
 let goalTimeSeconds = 0;
+let goalWeekDistanceKm = 0;
+let goalWeekTimeSeconds = 0;
+let goalMonthDistanceKm = 0;
+let goalMonthTimeSeconds = 0;
+let goalYearDistanceKm = 0;
+let goalYearTimeSeconds = 0;
 
 // --- History save baseline (to avoid double-counting on multiple stops) ---
 let lastHistoryDistance = 0;
@@ -359,6 +369,9 @@ function updateCurrentStats() {
     document.getElementById("currentAvgSpeed").textContent = speedSamples > 0 ? (speedSum / speedSamples).toFixed(2) : "0.00";
     document.getElementById("currentPower").textContent = currentPower;
     document.getElementById("currentSteps").textContent = currentSteps;
+    const pace = currentSpeed > 0 ? (60 / currentSpeed) : 0;
+    const paceStr = pace > 0 ? `${Math.floor(pace)}:${String(Math.round((pace % 1) * 60)).padStart(2, "0")}` : "—";
+    document.getElementById("currentPace").textContent = paceStr;
     const mobileSpeedEl = document.getElementById("mobileCurrentSpeed");
     if (mobileSpeedEl) mobileSpeedEl.textContent = currentSpeed.toFixed(1);
 }
@@ -382,6 +395,7 @@ function updateCumulativeStats() {
     updateGoalProgress();
     updateTodayTotals();
     updatePeriodStats();
+    updateAllTimeExtras();
 }
 
 // ============================================================
@@ -518,6 +532,10 @@ function loadDefaults() {
     document.getElementById("weightInput").value = userWeight;
     document.getElementById("heightInput").value = userHeight;
     document.getElementById("ageInput").value    = userAge;
+    webhookUrl = localStorage.getItem("wp_webhook_url") || "";
+    webhookSecret = localStorage.getItem("wp_webhook_secret") || "";
+    document.getElementById("webhookUrlInput").value = webhookUrl;
+    document.getElementById("webhookSecretInput").value = webhookSecret;
 }
 
 function saveDefaults() {
@@ -527,6 +545,10 @@ function saveDefaults() {
     localStorage.setItem("wp_weight", userWeight);
     localStorage.setItem("wp_height", userHeight);
     localStorage.setItem("wp_age",    userAge);
+    webhookUrl = document.getElementById("webhookUrlInput").value.trim();
+    webhookSecret = document.getElementById("webhookSecretInput").value.trim();
+    localStorage.setItem("wp_webhook_url", webhookUrl);
+    localStorage.setItem("wp_webhook_secret", webhookSecret);
 }
 
 // ============================================================
@@ -584,19 +606,97 @@ async function exportStats() {
     const csv  = rows.map(r => r.join(",")).join("\n");
     const blob = new Blob([csv], { type: "text/csv" });
     const file = new File([blob], "walking_pad_stats.csv", { type: "text/csv" });
-    if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
-        try {
-            await navigator.share({ title: "Walking Pad Stats", files: [file] });
-        } catch (e) {
-            if (e.name !== "AbortError") triggerDownload(blob);
+    if (!webhookUrl) {
+        if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+            try {
+                await navigator.share({ title: "Walking Pad Stats", files: [file] });
+            } catch (e) {
+                if (e.name !== "AbortError") triggerDownload(blob);
+            }
+        } else {
+            triggerDownload(blob);
         }
-    } else {
-        triggerDownload(blob);
     }
     autoSaveCumulativeStats();
+    if (webhookUrl) {
+        const payload = {
+            secret: webhookSecret,
+            exportedAt: new Date().toISOString(),
+            session: {
+                distance: currentDistance,
+                calories: Math.round(currentCalories),
+                timeSeconds: currentTimeSeconds,
+                maxSpeed,
+                avgSpeed: speedSamples > 0 ? speedSum / speedSamples : 0,
+                pace: (speedSamples > 0 && (speedSum / speedSamples) > 0) ? 60 / (speedSum / speedSamples) : 0,
+                steps: currentSteps,
+                pauseCount,
+            },
+            cumulative: {
+                distance: cumDistance,
+                calories: Math.round(cumCalories),
+                timeSeconds: cumTimeSeconds,
+                maxSpeed,
+                avgSpeed: speedSamples > 0 ? speedSum / speedSamples : 0,
+                pace: (speedSamples > 0 && (speedSum / speedSamples) > 0) ? 60 / (speedSum / speedSamples) : 0,
+                steps: cumSteps,
+                pauseCount,
+                pauseTimeSeconds: totalPauseTime,
+            },
+            history: JSON.parse(localStorage.getItem("wp_history") || "{}"),
+        };
+        fetch(webhookUrl, {
+            method: "POST",
+            headers: { "Content-Type": "text/plain" },
+            body: JSON.stringify(payload),
+        }).catch(e => console.warn("Webhook failed:", e));
+    }
     renderCharts();
     renderSessionHistory();
     updateRecoverBtn();
+}
+
+async function copyForSheets() {
+    const history = JSON.parse(localStorage.getItem("wp_history") || "{}");
+    const dates = Object.keys(history).sort();
+    const header = [
+        "Date", "Week", "Month", "Year", "Session End",
+        "Distance (km)", "Calories (kcal)", "Duration (min)",
+        "Avg Speed (km/h)", "Max Speed (km/h)", "Pace (min/km)",
+        "Steps", "Pauses"
+    ];
+    const rows = dates.map(date => {
+        const d = history[date];
+        const dt = new Date(date);
+        const week = Math.ceil((((dt - new Date(dt.getFullYear(), 0, 1)) / 86400000) + 1) / 7);
+        const month = dt.toLocaleDateString("en-US", { month: "short", year: "numeric" });
+        const year = dt.getFullYear();
+        const sessionEnd = d.lastUpdated ? new Date(d.lastUpdated).toLocaleString() : "—";
+        const avg = d.speedSamples > 0 ? d.speedSum / d.speedSamples : 0;
+        const pace = avg > 0 ? parseFloat((60 / avg).toFixed(2)) : 0;
+        const durationMin = parseFloat(((d.timeSeconds || 0) / 60).toFixed(1));
+        return [
+            date, week, month, year, sessionEnd,
+            parseFloat(d.distance.toFixed(2)),
+            Math.round(d.calories),
+            durationMin,
+            parseFloat(avg.toFixed(2)),
+            parseFloat((d.maxSpeed || 0).toFixed(1)),
+            pace,
+            0,
+            d.pauses || 0,
+        ];
+    });
+    const tsv = [header, ...rows].map(r => r.join("\t")).join("\n");
+    try {
+        await navigator.clipboard.writeText(tsv);
+        const btn = document.getElementById("copyForSheetsBtn");
+        const orig = btn.innerHTML;
+        btn.innerHTML = '<i class="fas fa-check"></i><span class="hidden sm:inline"> Copied!</span>';
+        setTimeout(() => { btn.innerHTML = orig; }, 2000);
+    } catch (e) {
+        console.warn("Clipboard write failed:", e);
+    }
 }
 
 // ============================================================
@@ -614,7 +714,7 @@ function saveSessionToHistory() {
     const today = new Date().toISOString().slice(0, 10);
     let history = JSON.parse(localStorage.getItem("wp_history") || "{}");
     if (!history[today]) {
-        history[today] = { distance: 0, calories: 0, speedSum: 0, speedSamples: 0, timeSeconds: 0, sessions: 0, pauses: 0 };
+        history[today] = { distance: 0, calories: 0, speedSum: 0, speedSamples: 0, timeSeconds: 0, sessions: 0, pauses: 0, maxSpeed: 0 };
     }
     history[today].distance     += deltaDistance;
     history[today].calories     += deltaCalories;
@@ -623,6 +723,8 @@ function saveSessionToHistory() {
     history[today].timeSeconds   = (history[today].timeSeconds || 0) + Math.max(0, deltaTimeSeconds);
     history[today].sessions      = (history[today].sessions || 0) + 1;
     history[today].pauses        = (history[today].pauses   || 0) + deltaPauses;
+    history[today].maxSpeed      = Math.max(history[today].maxSpeed || 0, maxSpeed);
+    history[today].lastUpdated   = new Date().toISOString();
     localStorage.setItem("wp_history", JSON.stringify(history));
     lastHistoryDistance     = cumDistance;
     lastHistoryCalories     = cumCalories;
@@ -692,12 +794,13 @@ function renderSessionHistory() {
     let dates   = Object.keys(history).sort().reverse();
     const tbody = document.getElementById("historyTableBody");
     if (dates.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="7" class="py-4 text-center text-gray-400">No history yet</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="8" class="py-4 text-center text-gray-400">No history yet</td></tr>';
         return;
     }
     tbody.innerHTML = dates.map(date => {
         const d        = history[date];
         const avgSpeed = d.speedSamples > 0 ? (d.speedSum / d.speedSamples).toFixed(2) : "0.00";
+        const maxSpd   = (d.maxSpeed || 0).toFixed(1);
         const timeStr  = d.timeSeconds > 0
             ? new Date(d.timeSeconds * 1000).toISOString().slice(11, 19)
             : "—";
@@ -709,8 +812,9 @@ function renderSessionHistory() {
             <td class="py-2 font-semibold text-accent">${Math.round(d.calories)}</td>
             <td class="py-2 font-semibold text-yellow-400">${timeStr}</td>
             <td class="py-2 font-semibold text-blue-400">${avgSpeed}</td>
-            <td class="py-2 font-semibold text-green-400">${sessions}</td>
-            <td class="py-2 font-semibold text-purple-400">${pauses}</td>
+            <td class="py-2 font-semibold text-green-400 hidden md:table-cell">${maxSpd}</td>
+            <td class="py-2 font-semibold text-green-400 hidden md:table-cell">${sessions}</td>
+            <td class="py-2 font-semibold text-purple-400 hidden md:table-cell">${pauses}</td>
         </tr>`;
     }).join("");
 }
@@ -769,31 +873,111 @@ function updateLiveSpeedChart() {
 // ============================================================
 
 function loadGoals() {
-    goalDistanceKm  = parseFloat(localStorage.getItem("wp_goal_distance"))       || 0;
-    goalTimeSeconds = parseInt(localStorage.getItem("wp_goal_time_seconds"))      || 0;
-    if (goalDistanceKm > 0) {
-        document.getElementById("goalDistanceInput").value = goalDistanceKm;
-        document.getElementById("goalDistanceTarget").textContent = goalDistanceKm.toFixed(1);
-    }
-    if (goalTimeSeconds > 0) {
-        document.getElementById("goalTimeInput").value = formatSeconds(goalTimeSeconds);
-        document.getElementById("goalTimeTarget").textContent = formatSeconds(goalTimeSeconds);
-    }
+    goalDistanceKm      = parseFloat(localStorage.getItem("wp_goal_distance"))            || 0;
+    goalTimeSeconds     = parseInt(localStorage.getItem("wp_goal_time_seconds"))           || 0;
+    goalWeekDistanceKm  = parseFloat(localStorage.getItem("wp_goal_week_distance"))        || 0;
+    goalWeekTimeSeconds = parseInt(localStorage.getItem("wp_goal_week_time_seconds"))      || 0;
+    goalMonthDistanceKm = parseFloat(localStorage.getItem("wp_goal_month_distance"))       || 0;
+    goalMonthTimeSeconds = parseInt(localStorage.getItem("wp_goal_month_time_seconds"))    || 0;
+    goalYearDistanceKm  = parseFloat(localStorage.getItem("wp_goal_year_distance"))        || 0;
+    goalYearTimeSeconds = parseInt(localStorage.getItem("wp_goal_year_time_seconds"))      || 0;
+    // Populate sliders and displays
+    const distSlider = document.getElementById("goalDistanceSlider");
+    distSlider.value = goalDistanceKm;
+    document.getElementById("goalDistanceDisplay").textContent = goalDistanceKm > 0 ? goalDistanceKm.toFixed(1) : "—";
+
+    const timeSlider = document.getElementById("goalTimeSlider");
+    const timeMins = Math.round(goalTimeSeconds / 60);
+    timeSlider.value = timeMins;
+    document.getElementById("goalTimeDisplay").textContent = goalTimeSeconds > 0 ? timeMins + ":00" : "—";
+
+    const weekDistSlider = document.getElementById("goalWeekDistanceSlider");
+    weekDistSlider.value = goalWeekDistanceKm;
+    document.getElementById("goalWeekDistanceDisplay").textContent = goalWeekDistanceKm > 0 ? goalWeekDistanceKm.toFixed(1) : "—";
+
+    const weekTimeSlider = document.getElementById("goalWeekTimeSlider");
+    const weekTimeMins = Math.round(goalWeekTimeSeconds / 60);
+    weekTimeSlider.value = weekTimeMins;
+    document.getElementById("goalWeekTimeDisplay").textContent = goalWeekTimeSeconds > 0 ? formatHHMM(goalWeekTimeSeconds) : "—";
+
+    const monthDistSlider = document.getElementById("goalMonthDistanceSlider");
+    monthDistSlider.value = goalMonthDistanceKm;
+    document.getElementById("goalMonthDistanceDisplay").textContent = goalMonthDistanceKm > 0 ? goalMonthDistanceKm.toFixed(1) : "—";
+
+    const monthTimeSlider = document.getElementById("goalMonthTimeSlider");
+    const monthTimeMins = Math.round(goalMonthTimeSeconds / 60);
+    monthTimeSlider.value = monthTimeMins;
+    document.getElementById("goalMonthTimeDisplay").textContent = goalMonthTimeSeconds > 0 ? formatHHMM(goalMonthTimeSeconds) : "—";
+
+    const yearDistSlider = document.getElementById("goalYearDistanceSlider");
+    yearDistSlider.value = goalYearDistanceKm;
+    document.getElementById("goalYearDistanceDisplay").textContent = goalYearDistanceKm > 0 ? goalYearDistanceKm.toFixed(0) : "—";
+
+    const yearTimeSlider = document.getElementById("goalYearTimeSlider");
+    const yearTimeMins = Math.round(goalYearTimeSeconds / 60);
+    yearTimeSlider.value = yearTimeMins;
+    document.getElementById("goalYearTimeDisplay").textContent = goalYearTimeSeconds > 0 ? formatHHMM(goalYearTimeSeconds) : "—";
 }
 
 function updateGoalProgress() {
+    const today = getPeriodStats(1);
     if (goalDistanceKm > 0) {
-        const pct = Math.min(100, (cumDistance / goalDistanceKm) * 100);
+        const pct = Math.min(100, (today.dist / goalDistanceKm) * 100);
         document.getElementById("goalDistanceBar").style.width = pct + "%";
-        document.getElementById("goalDistanceProgress").textContent = cumDistance.toFixed(2);
+        document.getElementById("goalDistanceProgress").textContent = today.dist.toFixed(2);
         document.getElementById("goalDistanceTarget").textContent = goalDistanceKm.toFixed(1);
     }
     if (goalTimeSeconds > 0) {
-        const pct = Math.min(100, (cumTimeSeconds / goalTimeSeconds) * 100);
+        const pct = Math.min(100, (today.time / goalTimeSeconds) * 100);
         document.getElementById("goalTimeBar").style.width = pct + "%";
-        document.getElementById("goalTimeProgress").textContent = new Date(cumTimeSeconds * 1000).toISOString().slice(11, 19);
+        document.getElementById("goalTimeProgress").textContent = new Date(today.time * 1000).toISOString().slice(11, 19);
         document.getElementById("goalTimeTarget").textContent = formatSeconds(goalTimeSeconds);
     }
+    const week = getPeriodStats(7);
+    if (goalWeekDistanceKm > 0) {
+        const pct = Math.min(100, (week.dist / goalWeekDistanceKm) * 100);
+        document.getElementById("weekGoalBar").style.width = pct + "%";
+        document.getElementById("weekGoalProgress").textContent = week.dist.toFixed(2);
+        document.getElementById("weekGoalTarget").textContent = goalWeekDistanceKm.toFixed(1);
+    }
+    if (goalWeekTimeSeconds > 0) {
+        const pct = Math.min(100, (week.time / goalWeekTimeSeconds) * 100);
+        document.getElementById("weekTimeGoalBar").style.width = pct + "%";
+        document.getElementById("weekTimeGoalProgress").textContent = new Date(week.time * 1000).toISOString().slice(11, 19);
+        document.getElementById("weekTimeGoalTarget").textContent = formatHHMM(goalWeekTimeSeconds);
+    }
+    const month = getPeriodStats(30);
+    if (goalMonthDistanceKm > 0) {
+        const pct = Math.min(100, (month.dist / goalMonthDistanceKm) * 100);
+        document.getElementById("monthGoalBar").style.width = pct + "%";
+        document.getElementById("monthGoalProgress").textContent = month.dist.toFixed(2);
+        document.getElementById("monthGoalTarget").textContent = goalMonthDistanceKm.toFixed(1);
+    }
+    if (goalMonthTimeSeconds > 0) {
+        const pct = Math.min(100, (month.time / goalMonthTimeSeconds) * 100);
+        document.getElementById("monthTimeGoalBar").style.width = pct + "%";
+        document.getElementById("monthTimeGoalProgress").textContent = new Date(month.time * 1000).toISOString().slice(11, 19);
+        document.getElementById("monthTimeGoalTarget").textContent = formatHHMM(goalMonthTimeSeconds);
+    }
+    const year = getPeriodStats(365);
+    if (goalYearDistanceKm > 0) {
+        const pct = Math.min(100, (year.dist / goalYearDistanceKm) * 100);
+        document.getElementById("yearGoalBar").style.width = pct + "%";
+        document.getElementById("yearGoalProgress").textContent = year.dist.toFixed(2);
+        document.getElementById("yearGoalTarget").textContent = goalYearDistanceKm.toFixed(0);
+    }
+    if (goalYearTimeSeconds > 0) {
+        const pct = Math.min(100, (year.time / goalYearTimeSeconds) * 100);
+        document.getElementById("yearTimeGoalBar").style.width = pct + "%";
+        document.getElementById("yearTimeGoalProgress").textContent = new Date(year.time * 1000).toISOString().slice(11, 19);
+        document.getElementById("yearTimeGoalTarget").textContent = formatHHMM(goalYearTimeSeconds);
+    }
+}
+
+function formatHHMM(totalSeconds) {
+    const h = Math.floor(totalSeconds / 3600);
+    const m = Math.floor((totalSeconds % 3600) / 60);
+    return `${h}:${String(m).padStart(2, "0")}`;
 }
 
 function parseTimeInput(val) {
@@ -803,27 +987,26 @@ function parseTimeInput(val) {
     return 0;
 }
 
+// Parse hh:mm into total seconds (for weekly/monthly/yearly time goals)
+function parseHHMM(val) {
+    const parts = val.trim().split(":").map(Number);
+    if (parts.length === 2) return parts[0] * 3600 + parts[1] * 60;
+    return 0;
+}
+
 // ============================================================
 // Today's Totals
 // ============================================================
 
 function updateTodayTotals() {
-    const today   = new Date().toISOString().slice(0, 10);
-    const history = JSON.parse(localStorage.getItem("wp_history") || "{}");
-    const h = history[today] || { distance: 0, calories: 0, speedSum: 0, speedSamples: 0, timeSeconds: 0 };
-
-    // Add current unsaved session delta on top of what's already persisted to history
-    const totalDist    = h.distance    + Math.max(0, cumDistance    - lastHistoryDistance);
-    const totalCal     = h.calories    + Math.max(0, cumCalories    - lastHistoryCalories);
-    const totalTime    = (h.timeSeconds || 0) + Math.max(0, cumTimeSeconds - lastHistoryTimeSeconds);
-    const totalSpdSum  = h.speedSum    + Math.max(0, speedSum       - lastHistorySpeedSum);
-    const totalSpdSamp = h.speedSamples + Math.max(0, speedSamples  - lastHistorySpeedSamples);
-    const avgSpeed     = totalSpdSamp > 0 ? (totalSpdSum / totalSpdSamp).toFixed(2) : "0.00";
-
-    document.getElementById("todayDistance").textContent = totalDist.toFixed(2);
-    document.getElementById("todayCalories").textContent = Math.round(totalCal);
-    document.getElementById("todayTime").textContent     = new Date(totalTime * 1000).toISOString().slice(11, 19);
-    document.getElementById("todayAvgSpeed").textContent = avgSpeed;
+    const s = getPeriodStats(1);
+    const fmt = (sec) => new Date(sec * 1000).toISOString().slice(11, 19);
+    document.getElementById("todayDistance").textContent = s.dist.toFixed(2);
+    document.getElementById("todayCalories").textContent = Math.round(s.cal);
+    document.getElementById("todayTime").textContent     = fmt(s.time);
+    document.getElementById("todayAvgSpeed").textContent = s.avgSpeed.toFixed(2);
+    document.getElementById("todaySessions").textContent = s.sess;
+    document.getElementById("todayPauses").textContent   = s.pauses;
 }
 
 // ============================================================
@@ -834,7 +1017,7 @@ function getPeriodStats(days) {
     const history  = JSON.parse(localStorage.getItem("wp_history") || "{}");
     const today    = new Date().toISOString().slice(0, 10);
     const cutoff   = new Date(Date.now() - (days - 1) * 86400000).toISOString().slice(0, 10);
-    let dist = 0, cal = 0, time = 0, spdSum = 0, spdSamp = 0, sess = 0, pauses = 0;
+    let dist = 0, cal = 0, time = 0, spdSum = 0, spdSamp = 0, sess = 0, pauses = 0, maxSpd = 0;
     Object.entries(history).forEach(([date, d]) => {
         if (date >= cutoff && date <= today) {
             dist    += d.distance    || 0;
@@ -844,6 +1027,7 @@ function getPeriodStats(days) {
             spdSamp += d.speedSamples || 0;
             sess    += d.sessions    || 0;
             pauses  += d.pauses      || 0;
+            maxSpd   = Math.max(maxSpd, d.maxSpeed || 0);
         }
     });
     // Add current unsaved session delta for today
@@ -854,14 +1038,16 @@ function getPeriodStats(days) {
         spdSum  += Math.max(0, speedSum       - lastHistorySpeedSum);
         spdSamp += Math.max(0, speedSamples   - lastHistorySpeedSamples);
         pauses  += Math.max(0, pauseCount     - lastHistoryPauseCount);
+        maxSpd   = Math.max(maxSpd, maxSpeed);
     }
     const avgSpeed = spdSamp > 0 ? spdSum / spdSamp : 0;
-    return { dist, cal, time, avgSpeed, sess, pauses };
+    return { dist, cal, time, avgSpeed, sess, pauses, maxSpd };
 }
 
 function updatePeriodStats() {
     const week  = getPeriodStats(7);
     const month = getPeriodStats(30);
+    const year  = getPeriodStats(365);
 
     const fmt = (s) => new Date(s * 1000).toISOString().slice(11, 19);
 
@@ -878,6 +1064,30 @@ function updatePeriodStats() {
     document.getElementById("monthAvgSpd").textContent   = month.avgSpeed.toFixed(2);
     document.getElementById("monthSessions").textContent = month.sess;
     document.getElementById("monthPauses").textContent   = month.pauses;
+
+    document.getElementById("yearDist").textContent     = year.dist.toFixed(2);
+    document.getElementById("yearCal").textContent      = Math.round(year.cal);
+    document.getElementById("yearTime").textContent     = fmt(year.time);
+    document.getElementById("yearAvgSpd").textContent   = year.avgSpeed.toFixed(2);
+    document.getElementById("yearSessions").textContent = year.sess;
+    document.getElementById("yearPauses").textContent   = year.pauses;
+}
+
+function getAllTimeExtras() {
+    const history = JSON.parse(localStorage.getItem("wp_history") || "{}");
+    let bestDayDist = 0, bestDayDate = null, totalSessions = 0;
+    Object.entries(history).forEach(([date, d]) => {
+        if ((d.distance || 0) > bestDayDist) { bestDayDist = d.distance; bestDayDate = date; }
+        totalSessions += d.sessions || 0;
+    });
+    return { bestDayDist, bestDayDate, totalSessions };
+}
+
+function updateAllTimeExtras() {
+    const { bestDayDist, bestDayDate, totalSessions } = getAllTimeExtras();
+    document.getElementById("allTimeBestDay").textContent =
+        bestDayDate ? `${bestDayDist.toFixed(2)} km (${bestDayDate})` : "—";
+    document.getElementById("allTimeTotalSessions").textContent = totalSessions;
 }
 
 // ============================================================
@@ -1115,22 +1325,78 @@ document.getElementById("closeSettingsBtn").addEventListener("click", () => {
     document.getElementById("settingsModal").classList.add("hidden");
 });
 
-document.getElementById("setGoalDistanceBtn").addEventListener("click", () => {
-    const val = parseFloat(document.getElementById("goalDistanceInput").value);
-    if (val > 0) {
-        goalDistanceKm = val;
-        localStorage.setItem("wp_goal_distance", goalDistanceKm);
-        document.getElementById("goalDistanceTarget").textContent = goalDistanceKm.toFixed(1);
-    }
+document.getElementById("goalsBtn").addEventListener("click", () => {
+    document.getElementById("goalsModal").classList.remove("hidden");
 });
 
-document.getElementById("setGoalTimeBtn").addEventListener("click", () => {
-    const val = parseTimeInput(document.getElementById("goalTimeInput").value);
-    if (val > 0) {
-        goalTimeSeconds = val;
-        localStorage.setItem("wp_goal_time_seconds", goalTimeSeconds);
-        document.getElementById("goalTimeTarget").textContent = formatSeconds(goalTimeSeconds);
-    }
+document.getElementById("closeGoalsBtn").addEventListener("click", () => {
+    document.getElementById("goalsModal").classList.add("hidden");
+});
+
+document.getElementById("copyForSheetsBtn").addEventListener("click", copyForSheets);
+
+document.getElementById("goalDistanceSlider").addEventListener("input", function() {
+    const val = parseFloat(this.value);
+    goalDistanceKm = val;
+    localStorage.setItem("wp_goal_distance", val);
+    document.getElementById("goalDistanceDisplay").textContent = val > 0 ? val.toFixed(1) : "—";
+    updateGoalProgress();
+});
+
+document.getElementById("goalTimeSlider").addEventListener("input", function() {
+    const mins = parseInt(this.value);
+    goalTimeSeconds = mins * 60;
+    localStorage.setItem("wp_goal_time_seconds", goalTimeSeconds);
+    document.getElementById("goalTimeDisplay").textContent = mins > 0 ? mins + ":00" : "—";
+    updateGoalProgress();
+});
+
+document.getElementById("goalWeekDistanceSlider").addEventListener("input", function() {
+    const val = parseFloat(this.value);
+    goalWeekDistanceKm = val;
+    localStorage.setItem("wp_goal_week_distance", val);
+    document.getElementById("goalWeekDistanceDisplay").textContent = val > 0 ? val.toFixed(1) : "—";
+    updateGoalProgress();
+});
+
+document.getElementById("goalWeekTimeSlider").addEventListener("input", function() {
+    const mins = parseInt(this.value);
+    goalWeekTimeSeconds = mins * 60;
+    localStorage.setItem("wp_goal_week_time_seconds", goalWeekTimeSeconds);
+    document.getElementById("goalWeekTimeDisplay").textContent = mins > 0 ? formatHHMM(goalWeekTimeSeconds) : "—";
+    updateGoalProgress();
+});
+
+document.getElementById("goalMonthDistanceSlider").addEventListener("input", function() {
+    const val = parseFloat(this.value);
+    goalMonthDistanceKm = val;
+    localStorage.setItem("wp_goal_month_distance", val);
+    document.getElementById("goalMonthDistanceDisplay").textContent = val > 0 ? val.toFixed(1) : "—";
+    updateGoalProgress();
+});
+
+document.getElementById("goalMonthTimeSlider").addEventListener("input", function() {
+    const mins = parseInt(this.value);
+    goalMonthTimeSeconds = mins * 60;
+    localStorage.setItem("wp_goal_month_time_seconds", goalMonthTimeSeconds);
+    document.getElementById("goalMonthTimeDisplay").textContent = mins > 0 ? formatHHMM(goalMonthTimeSeconds) : "—";
+    updateGoalProgress();
+});
+
+document.getElementById("goalYearDistanceSlider").addEventListener("input", function() {
+    const val = parseFloat(this.value);
+    goalYearDistanceKm = val;
+    localStorage.setItem("wp_goal_year_distance", val);
+    document.getElementById("goalYearDistanceDisplay").textContent = val > 0 ? val.toFixed(0) : "—";
+    updateGoalProgress();
+});
+
+document.getElementById("goalYearTimeSlider").addEventListener("input", function() {
+    const mins = parseInt(this.value);
+    goalYearTimeSeconds = mins * 60;
+    localStorage.setItem("wp_goal_year_time_seconds", goalYearTimeSeconds);
+    document.getElementById("goalYearTimeDisplay").textContent = mins > 0 ? formatHHMM(goalYearTimeSeconds) : "—";
+    updateGoalProgress();
 });
 
 document.querySelectorAll(".live-window-btn").forEach(btn => {
@@ -1246,6 +1512,7 @@ window.addEventListener("DOMContentLoaded", () => {
     updateCumulativeStats();
     updateTodayTotals();
     updatePeriodStats();
+    updateAllTimeExtras();
     initLiveSpeedChart();
     renderCharts();
     renderSessionHistory();
@@ -1256,10 +1523,10 @@ window.addEventListener("DOMContentLoaded", () => {
         if (document.visibilityState === "visible" && isRunning) requestWakeLock();
     });
     if (window.innerWidth < 768) {
-        ["goalContent", "liveSpeedContent", "historyChartsContent", "sessionHistoryContent"].forEach(id => {
+        ["liveSpeedContent", "historyChartsContent", "sessionHistoryContent"].forEach(id => {
             document.getElementById(id).classList.add("hidden");
         });
-        ["goalChevron", "liveSpeedChevron", "historyChartsChevron", "sessionHistoryChevron"].forEach(id => {
+        ["liveSpeedChevron", "historyChartsChevron", "sessionHistoryChevron"].forEach(id => {
             document.getElementById(id).classList.add("rotate-180");
         });
     }

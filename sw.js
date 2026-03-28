@@ -1,5 +1,5 @@
 "use strict";
-const CACHE = "walkpad-v3";
+const CACHE = "walkpad-v4";
 const ASSETS = ["./", "./index.html", "./script.js", "./manifest.json", "./icon.svg"];
 
 self.addEventListener("install", e => {
@@ -15,6 +15,7 @@ self.addEventListener("activate", e =>
     )
 );
 
-self.addEventListener("fetch", e =>
-    e.respondWith(caches.match(e.request).then(r => r || fetch(e.request)))
-);
+self.addEventListener("fetch", e => {
+    if (self.location.hostname === "localhost" || self.location.hostname === "127.0.0.1") return;
+    e.respondWith(caches.match(e.request).then(r => r || fetch(e.request)));
+});
