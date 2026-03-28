@@ -45,12 +45,9 @@ let prevCalories = 0;
 let prevTimeSeconds = 0;
 
 // --- User Profile ---
-let defaultWeight = 84;
-let defaultHeight = "5'11\"";
-let defaultAge = 30;
-let userWeight = defaultWeight;
-let userHeight = defaultHeight;
-let userAge = defaultAge;
+let userWeight = 80;
+let userHeight = "5'8\"";
+let userAge = 25;
 let currentPower = 0;
 let currentSteps = 0;
 
@@ -479,18 +476,22 @@ function loadDefaults() {
     const w = localStorage.getItem("wp_weight");
     const h = localStorage.getItem("wp_height");
     const a = localStorage.getItem("wp_age");
-    userWeight = w ? parseFloat(w) : defaultWeight;
-    userHeight = h ? h : defaultHeight;
-    userAge    = a ? parseInt(a)   : defaultAge;
+    if (!w || !h || !a) {
+        showOnboardingModal();
+        return;
+    }
+    userWeight = parseFloat(w);
+    userHeight = h;
+    userAge    = parseInt(a);
     document.getElementById("weightInput").value = userWeight;
     document.getElementById("heightInput").value = userHeight;
     document.getElementById("ageInput").value    = userAge;
 }
 
 function saveDefaults() {
-    userWeight = parseFloat(document.getElementById("weightInput").value) || defaultWeight;
-    userHeight = document.getElementById("heightInput").value || defaultHeight;
-    userAge    = parseInt(document.getElementById("ageInput").value)      || defaultAge;
+    userWeight = parseFloat(document.getElementById("weightInput").value) || userWeight;
+    userHeight = document.getElementById("heightInput").value            || userHeight;
+    userAge    = parseInt(document.getElementById("ageInput").value)     || userAge;
     localStorage.setItem("wp_weight", userWeight);
     localStorage.setItem("wp_height", userHeight);
     localStorage.setItem("wp_age",    userAge);
@@ -770,6 +771,51 @@ function updateTodayTotals() {
     document.getElementById("todayCalories").textContent = Math.round(totalCal);
     document.getElementById("todayTime").textContent     = new Date(totalTime * 1000).toISOString().slice(11, 19);
     document.getElementById("todayAvgSpeed").textContent = avgSpeed;
+}
+
+// ============================================================
+// Onboarding
+// ============================================================
+
+function showOnboardingModal() {
+    const modal = document.getElementById("onboardingModal");
+    modal.classList.remove("hidden");
+    modal.classList.add("flex");
+}
+
+function saveOnboarding() {
+    const w = parseFloat(document.getElementById("onboardingWeight").value);
+    const h = document.getElementById("onboardingHeight").value.trim();
+    const a = parseInt(document.getElementById("onboardingAge").value);
+    const err = document.getElementById("onboardingError");
+    if (!w || !h || !a) { err.classList.remove("hidden"); return; }
+    err.classList.add("hidden");
+    userWeight = w; userHeight = h; userAge = a;
+    localStorage.setItem("wp_weight", userWeight);
+    localStorage.setItem("wp_height", userHeight);
+    localStorage.setItem("wp_age", userAge);
+    document.getElementById("weightInput").value = userWeight;
+    document.getElementById("heightInput").value = userHeight;
+    document.getElementById("ageInput").value    = userAge;
+    const modal = document.getElementById("onboardingModal");
+    modal.classList.add("hidden");
+    modal.classList.remove("flex");
+}
+
+// ============================================================
+// Collapsible Sections
+// ============================================================
+
+function toggleSection(contentId, chevronId) {
+    document.getElementById(contentId).classList.toggle("hidden");
+    document.getElementById(chevronId).classList.toggle("rotate-180");
+}
+
+function toggleTotalsMore() {
+    document.getElementById("cumMoreStats").classList.toggle("hidden");
+    document.getElementById("cumMoreChevron").classList.toggle("rotate-180");
+    const label = document.getElementById("cumMoreLabel");
+    label.textContent = label.textContent === "Show more" ? "Show less" : "Show more";
 }
 
 // ============================================================
@@ -1061,6 +1107,19 @@ document.getElementById("clearHistoryBtn").addEventListener("click", () => {
     renderCharts();
     renderSessionHistory();
 });
+
+document.getElementById("saveOnboardingBtn").addEventListener("click", saveOnboarding);
+
+// --- Mobile bottom bar ---
+document.getElementById("startBtnM").addEventListener("click",     () => document.getElementById("startBtn").click());
+document.getElementById("stopBtnM").addEventListener("click",      () => document.getElementById("stopBtn").click());
+document.getElementById("pauseBtnM").addEventListener("click",     () => document.getElementById("pauseBtn").click());
+document.getElementById("resumeBtnM").addEventListener("click",    () => document.getElementById("resumeBtn").click());
+document.getElementById("speedDownBtnM").addEventListener("click", () => document.getElementById("speedDownBtn").click());
+document.getElementById("speedUpBtnM").addEventListener("click",   () => document.getElementById("speedUpBtn").click());
+document.getElementById("preset35BtnM").addEventListener("click",  () => startAndSetSpeed(3.5));
+document.getElementById("preset45BtnM").addEventListener("click",  () => startAndSetSpeed(4.5));
+document.getElementById("preset55BtnM").addEventListener("click",  () => startAndSetSpeed(5.5));
 
 // ============================================================
 // Init on DOM Ready
