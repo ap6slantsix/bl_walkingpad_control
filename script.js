@@ -1137,4 +1137,12 @@ window.addEventListener("DOMContentLoaded", () => {
     renderSessionHistory();
     updateRecoverBtn();
     updateExportRecoverBtn();
+    if (window.innerWidth < 768) {
+        ["goalContent", "liveSpeedContent", "historyChartsContent", "sessionHistoryContent"].forEach(id => {
+            document.getElementById(id).classList.add("hidden");
+        });
+        ["goalChevron", "liveSpeedChevron", "historyChartsChevron", "sessionHistoryChevron"].forEach(id => {
+            document.getElementById(id).classList.add("rotate-180");
+        });
+    }
 });
