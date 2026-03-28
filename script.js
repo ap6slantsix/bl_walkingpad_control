@@ -6,6 +6,28 @@ const FTMS_CONTROL    = "00002ad9-0000-1000-8000-00805f9b34fb";
 const FTMS_TREADMILL  = "00002acd-0000-1000-8000-00805f9b34fb";
 const FTMS_STATUS     = "00002ada-0000-1000-8000-00805f9b34fb";
 
+// --- Wake Lock ---
+let wakeLock = null;
+
+async function requestWakeLock() {
+    if (!("wakeLock" in navigator)) return;
+    try {
+        wakeLock = await navigator.wakeLock.request("screen");
+        wakeLock.addEventListener("release", () => { wakeLock = null; });
+    } catch (e) {
+        console.warn("Wake lock failed:", e);
+    }
+}
+
+function releaseWakeLock() {
+    if (wakeLock) { wakeLock.release(); wakeLock = null; }
+}
+
+// --- Haptic ---
+function haptic(pattern = 50) {
+    if (navigator.vibrate) navigator.vibrate(pattern);
+}
+
 // --- BLE State ---
 let device, server;
 let ftmsService = null, cFTMSControl = null, cFTMSTreadmill = null, cFTMSStatus = null;
@@ -180,6 +202,7 @@ function handleFTMSStatus(event) {
         isRunning = true;
         isPaused  = false;
         setStatus("Running", "bg-green-500");
+        requestWakeLock();
     } else if (opcode === 0x02 && value.byteLength >= 2 && value.getUint8(1) === 0x01) {
         // Belt fully stopped — pad resets its internal counters to 0 at this point
         isRunning = false;
@@ -197,6 +220,7 @@ function handleFTMSStatus(event) {
         } else {
             isPaused = false;
             setStatus("Stopped", "bg-orange-400");
+            releaseWakeLock();
         }
         updateCurrentStats();
     }
@@ -279,12 +303,14 @@ async function initBLE() {
 }
 
 function onDisconnected() {
-    isConnected  = false;
+    isConnected    = false;
     ftmsService    = null;
     cFTMSControl   = null;
     cFTMSTreadmill = null;
     cFTMSStatus    = null;
-    setStatus("Disconnected", "bg-red-500");
+    releaseWakeLock();
+    setStatus("Reconnecting…", "bg-yellow-400");
+    setTimeout(() => { if (!isConnected && device) initBLE(); }, 2000);
 }
 
 // ============================================================
@@ -332,6 +358,8 @@ function updateCurrentStats() {
     document.getElementById("currentAvgSpeed").textContent = speedSamples > 0 ? (speedSum / speedSamples).toFixed(2) : "0.00";
     document.getElementById("currentPower").textContent = currentPower;
     document.getElementById("currentSteps").textContent = currentSteps;
+    const mobileSpeedEl = document.getElementById("mobileCurrentSpeed");
+    if (mobileSpeedEl) mobileSpeedEl.textContent = currentSpeed.toFixed(1);
 }
 
 function updateCumulativeStats() {
@@ -532,22 +560,35 @@ function recoverFromExport() {
     recoverFromSnapshot(snapshot);
 }
 
-function exportStats() {
+function triggerDownload(blob) {
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "walking_pad_stats.csv";
+    a.click();
+}
+
+async function exportStats() {
     saveSessionToHistory();
     saveExportSnapshot();
     const avgSpeed = speedSamples > 0 ? (speedSum / speedSamples).toFixed(2) : "0.00";
     const avgPause = pauseCount > 0 ? (totalPauseTime / pauseCount).toFixed(0) : "0";
     const rows = [
         ["Type", "Speed", "Max Speed", "Avg Speed", "Distance", "Calories", "Time", "Pauses", "Total Pause Time (s)", "Avg Pause Time (s)"],
-        ["Current",    currentSpeed, maxSpeed, avgSpeed, currentDistance, currentCalories, new Date(currentTimeSeconds * 1000).toISOString().slice(11, 19), pauseCount, totalPauseTime.toFixed(0), avgPause],
-        ["Cumulative", currentSpeed, maxSpeed, avgSpeed, cumDistance,     cumCalories,     new Date(cumTimeSeconds * 1000).toISOString().slice(11, 19),     pauseCount, totalPauseTime.toFixed(0), avgPause],
+        ["Current",    currentSpeed, maxSpeed, avgSpeed, currentDistance, Math.round(currentCalories), new Date(currentTimeSeconds * 1000).toISOString().slice(11, 19), pauseCount, totalPauseTime.toFixed(0), avgPause],
+        ["Cumulative", currentSpeed, maxSpeed, avgSpeed, cumDistance,     Math.round(cumCalories),     new Date(cumTimeSeconds * 1000).toISOString().slice(11, 19),     pauseCount, totalPauseTime.toFixed(0), avgPause],
     ];
-    let csv  = rows.map(r => r.join(",")).join("\n");
-    let blob = new Blob([csv], { type: "text/csv" });
-    let a    = document.createElement("a");
-    a.href   = URL.createObjectURL(blob);
-    a.download = "walking_pad_stats.csv";
-    a.click();
+    const csv  = rows.map(r => r.join(",")).join("\n");
+    const blob = new Blob([csv], { type: "text/csv" });
+    const file = new File([blob], "walking_pad_stats.csv", { type: "text/csv" });
+    if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+        try {
+            await navigator.share({ title: "Walking Pad Stats", files: [file] });
+        } catch (e) {
+            if (e.name !== "AbortError") triggerDownload(blob);
+        }
+    } else {
+        triggerDownload(blob);
+    }
     autoSaveCumulativeStats();
     renderCharts();
     renderSessionHistory();
@@ -936,6 +977,7 @@ document.getElementById("continueNoBtn").addEventListener("click", () => {
 });
 
 document.getElementById("stopBtn").addEventListener("click", () => {
+    haptic([50, 30, 50]);
     isPaused = false;
     ftmsCmd([0x08, 0x01]);
     exportStats();
@@ -943,6 +985,7 @@ document.getElementById("stopBtn").addEventListener("click", () => {
 
 document.getElementById("pauseBtn").addEventListener("click", () => {
     if (isRunning) {
+        haptic();
         isPaused  = true;
         isRunning = false;
         pauseCount++;
@@ -955,6 +998,7 @@ document.getElementById("pauseBtn").addEventListener("click", () => {
 
 document.getElementById("resumeBtn").addEventListener("click", () => {
     if (!isRunning) {
+        haptic();
         if (pauseStartTimestamp) {
             totalPauseTime += (Date.now() - pauseStartTimestamp) / 1000;
             pauseStartTimestamp = null;
@@ -967,16 +1011,19 @@ document.getElementById("resumeBtn").addEventListener("click", () => {
 });
 
 document.getElementById("speedDownBtn").addEventListener("click", () => {
+    haptic(30);
     lastSpeed = Math.max(1.0, Math.round((lastSpeed * 10 - 5)) / 10);
     ftmsCmd(ftmsSpeedBytes(lastSpeed));
 });
 
 document.getElementById("speedUpBtn").addEventListener("click", () => {
+    haptic(30);
     lastSpeed = Math.min(12.0, Math.round((lastSpeed * 10 + 5)) / 10);
     ftmsCmd(ftmsSpeedBytes(lastSpeed));
 });
 
 function startAndSetSpeed(targetSpeed) {
+    haptic(30);
     lastSpeed = targetSpeed;
     if (!isRunning) {
         pendingResumeSpeed = targetSpeed;
@@ -1137,6 +1184,10 @@ window.addEventListener("DOMContentLoaded", () => {
     renderSessionHistory();
     updateRecoverBtn();
     updateExportRecoverBtn();
+    if ("serviceWorker" in navigator) navigator.serviceWorker.register("./sw.js");
+    document.addEventListener("visibilitychange", () => {
+        if (document.visibilityState === "visible" && isRunning) requestWakeLock();
+    });
     if (window.innerWidth < 768) {
         ["goalContent", "liveSpeedContent", "historyChartsContent", "sessionHistoryContent"].forEach(id => {
             document.getElementById(id).classList.add("hidden");

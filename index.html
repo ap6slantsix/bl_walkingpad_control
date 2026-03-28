@@ -4,6 +4,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#0ea5e9">
+    <link rel="manifest" href="manifest.json">
     <title>MS2H Walking Pad Control</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://unpkg.com/@fortawesome/fontawesome-free/css/all.min.css">
@@ -309,9 +311,9 @@
                 <i id="liveSpeedChevron" class="fas fa-chevron-down text-gray-400 transition-transform duration-200"></i>
             </button>
             <div id="liveSpeedContent" class="px-6 pb-6">
-                <div class="flex flex-wrap items-center gap-3 mb-4">
-                    <div class="flex flex-wrap items-center gap-1.5">
-                        <span class="text-xs text-gray-400 mr-1">Window</span>
+                <div class="flex flex-col gap-2 mb-4">
+                    <div class="flex items-center gap-1.5 flex-wrap">
+                        <span class="text-xs text-gray-400 w-14 shrink-0">Window</span>
                         <button data-window="30"   class="live-window-btn px-3 py-1.5 rounded text-xs font-semibold bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-sporty hover:text-white">30s</button>
                         <button data-window="60"   class="live-window-btn px-3 py-1.5 rounded text-xs font-semibold bg-sporty text-white">1m</button>
                         <button data-window="120"  class="live-window-btn px-3 py-1.5 rounded text-xs font-semibold bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-sporty hover:text-white">2m</button>
@@ -320,15 +322,15 @@
                         <button data-window="1800" class="live-window-btn px-3 py-1.5 rounded text-xs font-semibold bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-sporty hover:text-white">30m</button>
                         <button data-window="3600" class="live-window-btn px-3 py-1.5 rounded text-xs font-semibold bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-sporty hover:text-white">1h</button>
                     </div>
-                    <div class="flex flex-wrap items-center gap-1.5">
-                        <span class="text-xs text-gray-400 mr-1">Y max</span>
+                    <div class="flex items-center gap-1.5 flex-wrap">
+                        <span class="text-xs text-gray-400 w-14 shrink-0">Y max</span>
                         <button data-ymax="0"  class="live-ymax-btn px-3 py-1.5 rounded text-xs font-semibold bg-sporty text-white">Auto</button>
                         <button data-ymax="6"  class="live-ymax-btn px-3 py-1.5 rounded text-xs font-semibold bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-sporty hover:text-white">6</button>
                         <button data-ymax="8"  class="live-ymax-btn px-3 py-1.5 rounded text-xs font-semibold bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-sporty hover:text-white">8</button>
                         <button data-ymax="12" class="live-ymax-btn px-3 py-1.5 rounded text-xs font-semibold bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-sporty hover:text-white">12</button>
                     </div>
                 </div>
-                <canvas id="liveSpeedChart" height="80"></canvas>
+                <canvas id="liveSpeedChart" height="120"></canvas>
             </div>
         </div>
 
@@ -411,6 +413,10 @@
             <button id="resumeBtnM" class="bg-blue-500 active:bg-blue-600 text-white font-semibold rounded flex-1 h-12 flex flex-col items-center justify-center gap-0.5">
                 <i class="fas fa-play text-sm"></i><span class="text-xs">Resume</span>
             </button>
+        </div>
+        <div class="flex items-center justify-center gap-1.5 py-0.5 border-t border-gray-100 dark:border-gray-700">
+            <span id="mobileCurrentSpeed" class="text-sporty font-bold text-xl">0.0</span>
+            <span class="text-gray-400 text-xs">km/h</span>
         </div>
         <div class="flex gap-1.5 px-2 pb-2">
             <button id="speedDownBtnM" class="bg-gray-100 dark:bg-gray-700 active:bg-sporty text-gray-900 dark:text-white font-bold rounded flex-1 h-10 flex items-center justify-center border border-sporty text-sm">
