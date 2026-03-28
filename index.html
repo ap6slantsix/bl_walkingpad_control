@@ -83,6 +83,70 @@
             </span>
         </div>
 
+        <!-- Week / Month Summary -->
+        <div class="grid grid-cols-2 gap-3 mb-4">
+            <!-- 7-Day -->
+            <div class="bg-white dark:bg-gray-800 rounded-xl shadow p-3 border border-gray-200 dark:border-gray-600">
+                <div class="text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">Last 7 Days</div>
+                <div class="space-y-1.5 text-sm">
+                    <div class="flex justify-between items-center">
+                        <span class="flex items-center gap-1 text-sporty"><i class="fas fa-road text-xs"></i> Dist</span>
+                        <span class="font-bold"><span id="weekDist">0.00</span> <span class="text-gray-400 text-xs font-normal">km</span></span>
+                    </div>
+                    <div class="flex justify-between items-center">
+                        <span class="flex items-center gap-1 text-accent"><i class="fas fa-fire text-xs"></i> Cal</span>
+                        <span class="font-bold"><span id="weekCal">0</span> <span class="text-gray-400 text-xs font-normal">kcal</span></span>
+                    </div>
+                    <div class="flex justify-between items-center">
+                        <span class="flex items-center gap-1 text-yellow-400"><i class="fas fa-clock text-xs"></i> Time</span>
+                        <span class="font-bold" id="weekTime">00:00:00</span>
+                    </div>
+                    <div class="flex justify-between items-center">
+                        <span class="flex items-center gap-1 text-blue-400"><i class="fas fa-chart-line text-xs"></i> Avg</span>
+                        <span class="font-bold"><span id="weekAvgSpd">0.00</span> <span class="text-gray-400 text-xs font-normal">km/h</span></span>
+                    </div>
+                    <div class="flex justify-between items-center">
+                        <span class="flex items-center gap-1 text-green-400"><i class="fas fa-dumbbell text-xs"></i> Sessions</span>
+                        <span class="font-bold" id="weekSessions">0</span>
+                    </div>
+                    <div class="flex justify-between items-center">
+                        <span class="flex items-center gap-1 text-purple-400"><i class="fas fa-pause-circle text-xs"></i> Pauses</span>
+                        <span class="font-bold" id="weekPauses">0</span>
+                    </div>
+                </div>
+            </div>
+            <!-- 30-Day -->
+            <div class="bg-white dark:bg-gray-800 rounded-xl shadow p-3 border border-gray-200 dark:border-gray-600">
+                <div class="text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">Last 30 Days</div>
+                <div class="space-y-1.5 text-sm">
+                    <div class="flex justify-between items-center">
+                        <span class="flex items-center gap-1 text-sporty"><i class="fas fa-road text-xs"></i> Dist</span>
+                        <span class="font-bold"><span id="monthDist">0.00</span> <span class="text-gray-400 text-xs font-normal">km</span></span>
+                    </div>
+                    <div class="flex justify-between items-center">
+                        <span class="flex items-center gap-1 text-accent"><i class="fas fa-fire text-xs"></i> Cal</span>
+                        <span class="font-bold"><span id="monthCal">0</span> <span class="text-gray-400 text-xs font-normal">kcal</span></span>
+                    </div>
+                    <div class="flex justify-between items-center">
+                        <span class="flex items-center gap-1 text-yellow-400"><i class="fas fa-clock text-xs"></i> Time</span>
+                        <span class="font-bold" id="monthTime">00:00:00</span>
+                    </div>
+                    <div class="flex justify-between items-center">
+                        <span class="flex items-center gap-1 text-blue-400"><i class="fas fa-chart-line text-xs"></i> Avg</span>
+                        <span class="font-bold"><span id="monthAvgSpd">0.00</span> <span class="text-gray-400 text-xs font-normal">km/h</span></span>
+                    </div>
+                    <div class="flex justify-between items-center">
+                        <span class="flex items-center gap-1 text-green-400"><i class="fas fa-dumbbell text-xs"></i> Sessions</span>
+                        <span class="font-bold" id="monthSessions">0</span>
+                    </div>
+                    <div class="flex justify-between items-center">
+                        <span class="flex items-center gap-1 text-purple-400"><i class="fas fa-pause-circle text-xs"></i> Pauses</span>
+                        <span class="font-bold" id="monthPauses">0</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <!-- Controls + Speed (desktop only) -->
         <div class="hidden md:grid grid-cols-2 gap-4 mb-4">
             <div class="bg-white dark:bg-gray-800 rounded-xl shadow p-4 flex flex-col gap-3 border border-gray-200 dark:border-gray-600">
@@ -386,10 +450,12 @@
                                 <th class="pb-2 text-accent font-semibold">kcal</th>
                                 <th class="pb-2 text-yellow-400 font-semibold">Time</th>
                                 <th class="pb-2 text-blue-400 font-semibold">Avg km/h</th>
+                                <th class="pb-2 text-green-400 font-semibold">Sessions</th>
+                                <th class="pb-2 text-purple-400 font-semibold">Pauses</th>
                             </tr>
                         </thead>
                         <tbody id="historyTableBody">
-                            <tr><td colspan="5" class="py-4 text-center text-gray-400">No history yet</td></tr>
+                            <tr><td colspan="7" class="py-4 text-center text-gray-400">No history yet</td></tr>
                         </tbody>
                     </table>
                 </div>

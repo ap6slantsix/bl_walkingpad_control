@@ -88,6 +88,7 @@ let lastHistoryCalories = 0;
 let lastHistorySpeedSum = 0;
 let lastHistorySpeedSamples = 0;
 let lastHistoryTimeSeconds = 0;
+let lastHistoryPauseCount = 0;
 
 // --- Chart Instances ---
 const wpCharts = { distance: null, calories: null, speedHist: null, liveSpeed: null };
@@ -380,6 +381,7 @@ function updateCumulativeStats() {
     autoSaveCumulativeStats();
     updateGoalProgress();
     updateTodayTotals();
+    updatePeriodStats();
 }
 
 // ============================================================
@@ -399,6 +401,7 @@ function autoSaveCumulativeStats() {
     localStorage.setItem("wp_lastHistorySpeedSum", lastHistorySpeedSum);
     localStorage.setItem("wp_lastHistorySpeedSamples", lastHistorySpeedSamples);
     localStorage.setItem("wp_lastHistoryTimeSeconds", lastHistoryTimeSeconds);
+    localStorage.setItem("wp_lastHistoryPauseCount", lastHistoryPauseCount);
 }
 
 function saveSessionBackup() {
@@ -498,6 +501,7 @@ function loadCumulativeStats() {
     lastHistorySpeedSum     = parseFloat(localStorage.getItem("wp_lastHistorySpeedSum"))     || 0;
     lastHistorySpeedSamples = parseInt(localStorage.getItem("wp_lastHistorySpeedSamples"))   || 0;
     lastHistoryTimeSeconds  = parseInt(localStorage.getItem("wp_lastHistoryTimeSeconds"))    || 0;
+    lastHistoryPauseCount   = parseInt(localStorage.getItem("wp_lastHistoryPauseCount"))     || 0;
 }
 
 function loadDefaults() {
@@ -605,23 +609,27 @@ function saveSessionToHistory() {
     const deltaSpeedSum     = speedSum       - lastHistorySpeedSum;
     const deltaSpeedSamples = speedSamples   - lastHistorySpeedSamples;
     const deltaTimeSeconds  = cumTimeSeconds - lastHistoryTimeSeconds;
+    const deltaPauses       = Math.max(0, pauseCount - lastHistoryPauseCount);
     if (deltaDistance <= 0 && deltaSpeedSamples <= 0) return;
     const today = new Date().toISOString().slice(0, 10);
     let history = JSON.parse(localStorage.getItem("wp_history") || "{}");
     if (!history[today]) {
-        history[today] = { distance: 0, calories: 0, speedSum: 0, speedSamples: 0, timeSeconds: 0 };
+        history[today] = { distance: 0, calories: 0, speedSum: 0, speedSamples: 0, timeSeconds: 0, sessions: 0, pauses: 0 };
     }
     history[today].distance     += deltaDistance;
     history[today].calories     += deltaCalories;
     history[today].speedSum     += deltaSpeedSum;
     history[today].speedSamples += deltaSpeedSamples;
     history[today].timeSeconds   = (history[today].timeSeconds || 0) + Math.max(0, deltaTimeSeconds);
+    history[today].sessions      = (history[today].sessions || 0) + 1;
+    history[today].pauses        = (history[today].pauses   || 0) + deltaPauses;
     localStorage.setItem("wp_history", JSON.stringify(history));
     lastHistoryDistance     = cumDistance;
     lastHistoryCalories     = cumCalories;
     lastHistorySpeedSum     = speedSum;
     lastHistorySpeedSamples = speedSamples;
     lastHistoryTimeSeconds  = cumTimeSeconds;
+    lastHistoryPauseCount   = pauseCount;
 }
 
 function getChartData() {
@@ -684,7 +692,7 @@ function renderSessionHistory() {
     let dates   = Object.keys(history).sort().reverse();
     const tbody = document.getElementById("historyTableBody");
     if (dates.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="5" class="py-4 text-center text-gray-400">No history yet</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="7" class="py-4 text-center text-gray-400">No history yet</td></tr>';
         return;
     }
     tbody.innerHTML = dates.map(date => {
@@ -693,12 +701,16 @@ function renderSessionHistory() {
         const timeStr  = d.timeSeconds > 0
             ? new Date(d.timeSeconds * 1000).toISOString().slice(11, 19)
             : "—";
+        const sessions = d.sessions || 0;
+        const pauses   = d.pauses   || 0;
         return `<tr class="border-b border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800">
             <td class="py-2 text-gray-600 dark:text-gray-300">${date}</td>
             <td class="py-2 font-semibold text-sporty">${d.distance.toFixed(2)}</td>
             <td class="py-2 font-semibold text-accent">${Math.round(d.calories)}</td>
             <td class="py-2 font-semibold text-yellow-400">${timeStr}</td>
             <td class="py-2 font-semibold text-blue-400">${avgSpeed}</td>
+            <td class="py-2 font-semibold text-green-400">${sessions}</td>
+            <td class="py-2 font-semibold text-purple-400">${pauses}</td>
         </tr>`;
     }).join("");
 }
@@ -812,6 +824,60 @@ function updateTodayTotals() {
     document.getElementById("todayCalories").textContent = Math.round(totalCal);
     document.getElementById("todayTime").textContent     = new Date(totalTime * 1000).toISOString().slice(11, 19);
     document.getElementById("todayAvgSpeed").textContent = avgSpeed;
+}
+
+// ============================================================
+// Period Stats (Week / Month)
+// ============================================================
+
+function getPeriodStats(days) {
+    const history  = JSON.parse(localStorage.getItem("wp_history") || "{}");
+    const today    = new Date().toISOString().slice(0, 10);
+    const cutoff   = new Date(Date.now() - (days - 1) * 86400000).toISOString().slice(0, 10);
+    let dist = 0, cal = 0, time = 0, spdSum = 0, spdSamp = 0, sess = 0, pauses = 0;
+    Object.entries(history).forEach(([date, d]) => {
+        if (date >= cutoff && date <= today) {
+            dist    += d.distance    || 0;
+            cal     += d.calories    || 0;
+            time    += d.timeSeconds || 0;
+            spdSum  += d.speedSum    || 0;
+            spdSamp += d.speedSamples || 0;
+            sess    += d.sessions    || 0;
+            pauses  += d.pauses      || 0;
+        }
+    });
+    // Add current unsaved session delta for today
+    if (today >= cutoff) {
+        dist    += Math.max(0, cumDistance    - lastHistoryDistance);
+        cal     += Math.max(0, cumCalories    - lastHistoryCalories);
+        time    += Math.max(0, cumTimeSeconds - lastHistoryTimeSeconds);
+        spdSum  += Math.max(0, speedSum       - lastHistorySpeedSum);
+        spdSamp += Math.max(0, speedSamples   - lastHistorySpeedSamples);
+        pauses  += Math.max(0, pauseCount     - lastHistoryPauseCount);
+    }
+    const avgSpeed = spdSamp > 0 ? spdSum / spdSamp : 0;
+    return { dist, cal, time, avgSpeed, sess, pauses };
+}
+
+function updatePeriodStats() {
+    const week  = getPeriodStats(7);
+    const month = getPeriodStats(30);
+
+    const fmt = (s) => new Date(s * 1000).toISOString().slice(11, 19);
+
+    document.getElementById("weekDist").textContent     = week.dist.toFixed(2);
+    document.getElementById("weekCal").textContent      = Math.round(week.cal);
+    document.getElementById("weekTime").textContent     = fmt(week.time);
+    document.getElementById("weekAvgSpd").textContent   = week.avgSpeed.toFixed(2);
+    document.getElementById("weekSessions").textContent = week.sess;
+    document.getElementById("weekPauses").textContent   = week.pauses;
+
+    document.getElementById("monthDist").textContent     = month.dist.toFixed(2);
+    document.getElementById("monthCal").textContent      = Math.round(month.cal);
+    document.getElementById("monthTime").textContent     = fmt(month.time);
+    document.getElementById("monthAvgSpd").textContent   = month.avgSpeed.toFixed(2);
+    document.getElementById("monthSessions").textContent = month.sess;
+    document.getElementById("monthPauses").textContent   = month.pauses;
 }
 
 // ============================================================
@@ -1179,6 +1245,7 @@ window.addEventListener("DOMContentLoaded", () => {
     loadGoals();
     updateCumulativeStats();
     updateTodayTotals();
+    updatePeriodStats();
     initLiveSpeedChart();
     renderCharts();
     renderSessionHistory();
