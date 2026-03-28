@@ -82,6 +82,57 @@ let lastDistanceUpdate = Date.now();
 let webhookUrl = "";
 let webhookSecret = "";
 
+let cardCollapsed = {};
+let cardHidden = {};
+
+function applyCardCollapsed(id, collapsed) {
+    const body = document.getElementById("body-" + id);
+    const chevronBtn = document.getElementById("chevron-" + id);
+    const titleEl = document.getElementById("title-" + id);
+    if (!body) return;
+    body.classList.toggle("hidden", collapsed);
+    if (chevronBtn) chevronBtn.classList.toggle("hidden", collapsed);
+    if (titleEl) {
+        titleEl.classList.toggle("hidden", !collapsed);
+        titleEl.classList.toggle("flex", collapsed);
+    }
+}
+
+function toggleCardCollapse(id) {
+    cardCollapsed[id] = !cardCollapsed[id];
+    localStorage.setItem("wp_card_collapsed", JSON.stringify(cardCollapsed));
+    applyCardCollapsed(id, cardCollapsed[id]);
+}
+
+function applyCardHidden(id, hidden) {
+    const card = document.getElementById("card-" + id);
+    if (!card) return;
+    card.classList.toggle("hidden", hidden);
+}
+
+function loadCardState() {
+    cardCollapsed = JSON.parse(localStorage.getItem("wp_card_collapsed") || "{}");
+    cardHidden = JSON.parse(localStorage.getItem("wp_card_hidden") || "{}");
+    ["session", "period1", "period2", "alltime"].forEach(id => {
+        applyCardCollapsed(id, cardCollapsed[id] || false);
+        applyCardHidden(id, cardHidden[id] || false);
+        const cb = document.getElementById("show-card-" + id);
+        if (cb) cb.checked = !cardHidden[id];
+    });
+    document.querySelectorAll(".card-collapse-btn").forEach(btn => {
+        btn.addEventListener("click", () => toggleCardCollapse(btn.dataset.card));
+    });
+    ["session", "period1", "period2", "alltime"].forEach(id => {
+        const cb = document.getElementById("show-card-" + id);
+        if (!cb) return;
+        cb.addEventListener("change", function () {
+            cardHidden[id] = !this.checked;
+            localStorage.setItem("wp_card_hidden", JSON.stringify(cardHidden));
+            applyCardHidden(id, cardHidden[id]);
+        });
+    });
+}
+
 // --- Goals ---
 let goalDistanceKm = 0;
 let goalTimeSeconds = 0;
@@ -1518,6 +1569,7 @@ window.addEventListener("DOMContentLoaded", () => {
     renderSessionHistory();
     updateRecoverBtn();
     updateExportRecoverBtn();
+    loadCardState();
     if ("serviceWorker" in navigator) navigator.serviceWorker.register("./sw.js");
     document.addEventListener("visibilitychange", () => {
         if (document.visibilityState === "visible" && isRunning) requestWakeLock();
