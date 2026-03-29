@@ -424,17 +424,19 @@ function formatSeconds(sec) {
 function updateCurrentStats() {
     document.getElementById("currentSpeed").textContent = currentSpeed.toFixed(1);
     document.getElementById("currentDistance").textContent = currentDistance.toFixed(2);
-    currentPower = estimatePower(currentSpeed, userWeight);
     currentSteps = estimateSteps(estimatedDistanceKm, userHeight);
     document.getElementById("currentCalories").textContent = Math.round(currentCalories);
     document.getElementById("currentTime").textContent = new Date(currentTimeSeconds * 1000).toISOString().slice(11, 19);
     document.getElementById("currentMaxSpeed").textContent = maxSpeed.toFixed(1);
-    document.getElementById("currentAvgSpeed").textContent = speedSamples > 0 ? (speedSum / speedSamples).toFixed(2) : "0.00";
-    document.getElementById("currentPower").textContent = currentPower;
+    const avgSpeed = speedSamples > 0 ? (speedSum / speedSamples) : 0;
+    document.getElementById("currentAvgSpeed").textContent = avgSpeed.toFixed(2);
     document.getElementById("currentSteps").textContent = currentSteps;
+    document.getElementById("currentPauses").textContent = pauseCount;
     const pace = currentSpeed > 0 ? (60 / currentSpeed) : 0;
     const paceStr = pace > 0 ? `${Math.floor(pace)}:${String(Math.round((pace % 1) * 60)).padStart(2, "0")}` : "—";
     document.getElementById("currentPace").textContent = paceStr;
+    const avgPaceStr = avgSpeed > 0 ? (() => { const p = 60 / avgSpeed; return `${Math.floor(p)}:${String(Math.round((p % 1) * 60)).padStart(2, "0")}`; })() : "—";
+    document.getElementById("currentAvgPace").textContent = avgPaceStr;
     const mobileSpeedEl = document.getElementById("mobileCurrentSpeed");
     if (mobileSpeedEl) mobileSpeedEl.textContent = currentSpeed.toFixed(1);
 }
