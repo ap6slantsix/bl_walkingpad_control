@@ -148,6 +148,10 @@ let goalWeekDistanceKm = 0;
 let goalWeekTimeSeconds = 0;
 let goalMonthDistanceKm = 0;
 let goalMonthTimeSeconds = 0;
+let goalThreeMonthDistanceKm = 0;
+let goalThreeMonthTimeSeconds = 0;
+let goalSixMonthDistanceKm = 0;
+let goalSixMonthTimeSeconds = 0;
 let goalYearDistanceKm = 0;
 let goalYearTimeSeconds = 0;
 
@@ -437,19 +441,13 @@ function updateCurrentStats() {
 
 function updateCumulativeStats() {
     document.getElementById("cumDistance").textContent = cumDistance.toFixed(2);
-    cumPower  = estimatePower(currentSpeed, userWeight);
     cumSteps  = estimateSteps(cumEstimatedDistance, userHeight);
     document.getElementById("cumCalories").textContent = Math.round(cumCalories);
     document.getElementById("cumTime").textContent = new Date(cumTimeSeconds * 1000).toISOString().slice(11, 19);
     document.getElementById("cumMaxSpeed").textContent = maxSpeed.toFixed(1);
     document.getElementById("cumAvgSpeed").textContent = speedSamples > 0 ? (speedSum / speedSamples).toFixed(2) : "0.00";
     document.getElementById("cumPauseCount").textContent = pauseCount;
-    document.getElementById("cumTotalPauseTime").textContent = formatSeconds(totalPauseTime);
-    document.getElementById("cumAvgPauseTime").textContent = pauseCount > 0 ? formatSeconds(totalPauseTime / pauseCount) : "00:00";
-    document.getElementById("cumPower").textContent = cumPower;
-    document.getElementById("cumTotalPower").textContent = cumTotalPower;
     document.getElementById("cumSteps").textContent = cumSteps;
-    document.getElementById("cumEstimatedDistance").textContent = cumEstimatedDistance.toFixed(2);
     autoSaveCumulativeStats();
     updateGoalProgress();
     updateTodayTotals();
@@ -856,22 +854,36 @@ function renderSessionHistory() {
         tbody.innerHTML = '<tr><td colspan="8" class="py-4 text-center text-gray-400">No history yet</td></tr>';
         return;
     }
+    // Build set of streak dates for fire indicators
+    const streakDates = new Set();
+    const todayKey = new Date().toISOString().slice(0, 10);
+    const todayActive = (history[todayKey] && (history[todayKey].distance || 0) > 0) || cumDistance > 0;
+    const sd = new Date();
+    if (!todayActive) sd.setDate(sd.getDate() - 1);
+    for (let i = 0; i < 365; i++) {
+        const key = sd.toISOString().slice(0, 10);
+        const active = key === todayKey ? todayActive : (history[key] && (history[key].distance || 0) > 0);
+        if (active) { streakDates.add(key); sd.setDate(sd.getDate() - 1); }
+        else break;
+    }
     tbody.innerHTML = dates.map(date => {
         const d        = history[date];
         const avgSpeed = d.speedSamples > 0 ? (d.speedSum / d.speedSamples).toFixed(2) : "0.00";
-        const maxSpd   = (d.maxSpeed || 0).toFixed(1);
+        const steps    = (d.steps || 0).toLocaleString();
         const timeStr  = d.timeSeconds > 0
             ? new Date(d.timeSeconds * 1000).toISOString().slice(11, 19)
             : "—";
         const sessions = d.sessions || 0;
         const pauses   = d.pauses   || 0;
+        const fire     = streakDates.has(date)
+            ? '<i class="fas fa-fire text-orange-400 text-xs mr-1"></i>' : '';
         return `<tr class="border-b border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800">
-            <td class="py-2 text-gray-600 dark:text-gray-300">${date}</td>
+            <td class="py-2 text-gray-600 dark:text-gray-300">${fire}${date}</td>
             <td class="py-2 font-semibold text-sporty">${d.distance.toFixed(2)}</td>
             <td class="py-2 font-semibold text-accent">${Math.round(d.calories)}</td>
             <td class="py-2 font-semibold text-yellow-400">${timeStr}</td>
             <td class="py-2 font-semibold text-blue-400">${avgSpeed}</td>
-            <td class="py-2 font-semibold text-green-400 hidden md:table-cell">${maxSpd}</td>
+            <td class="py-2 font-semibold text-sporty hidden md:table-cell">${steps}</td>
             <td class="py-2 font-semibold text-green-400 hidden md:table-cell">${sessions}</td>
             <td class="py-2 font-semibold text-purple-400 hidden md:table-cell">${pauses}</td>
         </tr>`;
@@ -938,8 +950,12 @@ function loadGoals() {
     goalWeekTimeSeconds = parseInt(localStorage.getItem("wp_goal_week_time_seconds"))      || 0;
     goalMonthDistanceKm = parseFloat(localStorage.getItem("wp_goal_month_distance"))       || 0;
     goalMonthTimeSeconds = parseInt(localStorage.getItem("wp_goal_month_time_seconds"))    || 0;
-    goalYearDistanceKm  = parseFloat(localStorage.getItem("wp_goal_year_distance"))        || 0;
-    goalYearTimeSeconds = parseInt(localStorage.getItem("wp_goal_year_time_seconds"))      || 0;
+    goalThreeMonthDistanceKm  = parseFloat(localStorage.getItem("wp_goal_threemonth_distance"))       || 0;
+    goalThreeMonthTimeSeconds = parseInt(localStorage.getItem("wp_goal_threemonth_time_seconds"))     || 0;
+    goalSixMonthDistanceKm    = parseFloat(localStorage.getItem("wp_goal_sixmonth_distance"))         || 0;
+    goalSixMonthTimeSeconds   = parseInt(localStorage.getItem("wp_goal_sixmonth_time_seconds"))       || 0;
+    goalYearDistanceKm        = parseFloat(localStorage.getItem("wp_goal_year_distance"))             || 0;
+    goalYearTimeSeconds       = parseInt(localStorage.getItem("wp_goal_year_time_seconds"))           || 0;
     // Populate sliders and displays
     const distSlider = document.getElementById("goalDistanceSlider");
     distSlider.value = goalDistanceKm;
@@ -967,6 +983,22 @@ function loadGoals() {
     const monthTimeMins = Math.round(goalMonthTimeSeconds / 60);
     monthTimeSlider.value = monthTimeMins;
     document.getElementById("goalMonthTimeDisplay").textContent = goalMonthTimeSeconds > 0 ? formatHHMM(goalMonthTimeSeconds) : "—";
+
+    const threeMonthDistSlider = document.getElementById("goalThreeMonthDistanceSlider");
+    threeMonthDistSlider.value = goalThreeMonthDistanceKm;
+    document.getElementById("goalThreeMonthDistanceDisplay").textContent = goalThreeMonthDistanceKm > 0 ? goalThreeMonthDistanceKm.toFixed(1) : "—";
+
+    const threeMonthTimeSlider = document.getElementById("goalThreeMonthTimeSlider");
+    threeMonthTimeSlider.value = Math.round(goalThreeMonthTimeSeconds / 60);
+    document.getElementById("goalThreeMonthTimeDisplay").textContent = goalThreeMonthTimeSeconds > 0 ? formatHHMM(goalThreeMonthTimeSeconds) : "—";
+
+    const sixMonthDistSlider = document.getElementById("goalSixMonthDistanceSlider");
+    sixMonthDistSlider.value = goalSixMonthDistanceKm;
+    document.getElementById("goalSixMonthDistanceDisplay").textContent = goalSixMonthDistanceKm > 0 ? goalSixMonthDistanceKm.toFixed(1) : "—";
+
+    const sixMonthTimeSlider = document.getElementById("goalSixMonthTimeSlider");
+    sixMonthTimeSlider.value = Math.round(goalSixMonthTimeSeconds / 60);
+    document.getElementById("goalSixMonthTimeDisplay").textContent = goalSixMonthTimeSeconds > 0 ? formatHHMM(goalSixMonthTimeSeconds) : "—";
 
     const yearDistSlider = document.getElementById("goalYearDistanceSlider");
     yearDistSlider.value = goalYearDistanceKm;
@@ -1018,6 +1050,32 @@ function updateGoalProgress() {
         document.getElementById("monthTimeGoalProgress").textContent = new Date(month.time * 1000).toISOString().slice(11, 19);
         document.getElementById("monthTimeGoalTarget").textContent = formatHHMM(goalMonthTimeSeconds);
     }
+    const threeMonth = getPeriodStats(91);
+    if (goalThreeMonthDistanceKm > 0) {
+        const pct = Math.min(100, (threeMonth.dist / goalThreeMonthDistanceKm) * 100);
+        document.getElementById("threeMonthGoalBar").style.width = pct + "%";
+        document.getElementById("threeMonthGoalProgress").textContent = threeMonth.dist.toFixed(2);
+        document.getElementById("threeMonthGoalTarget").textContent = goalThreeMonthDistanceKm.toFixed(1);
+    }
+    if (goalThreeMonthTimeSeconds > 0) {
+        const pct = Math.min(100, (threeMonth.time / goalThreeMonthTimeSeconds) * 100);
+        document.getElementById("threeMonthTimeGoalBar").style.width = pct + "%";
+        document.getElementById("threeMonthTimeGoalProgress").textContent = new Date(threeMonth.time * 1000).toISOString().slice(11, 19);
+        document.getElementById("threeMonthTimeGoalTarget").textContent = formatHHMM(goalThreeMonthTimeSeconds);
+    }
+    const sixMonth = getPeriodStats(182);
+    if (goalSixMonthDistanceKm > 0) {
+        const pct = Math.min(100, (sixMonth.dist / goalSixMonthDistanceKm) * 100);
+        document.getElementById("sixMonthGoalBar").style.width = pct + "%";
+        document.getElementById("sixMonthGoalProgress").textContent = sixMonth.dist.toFixed(2);
+        document.getElementById("sixMonthGoalTarget").textContent = goalSixMonthDistanceKm.toFixed(1);
+    }
+    if (goalSixMonthTimeSeconds > 0) {
+        const pct = Math.min(100, (sixMonth.time / goalSixMonthTimeSeconds) * 100);
+        document.getElementById("sixMonthTimeGoalBar").style.width = pct + "%";
+        document.getElementById("sixMonthTimeGoalProgress").textContent = new Date(sixMonth.time * 1000).toISOString().slice(11, 19);
+        document.getElementById("sixMonthTimeGoalTarget").textContent = formatHHMM(goalSixMonthTimeSeconds);
+    }
     const year = getPeriodStats(365);
     if (goalYearDistanceKm > 0) {
         const pct = Math.min(100, (year.dist / goalYearDistanceKm) * 100);
@@ -1066,6 +1124,7 @@ function updateTodayTotals() {
     document.getElementById("todayAvgSpeed").textContent = s.avgSpeed.toFixed(2);
     document.getElementById("todaySessions").textContent = s.sess;
     document.getElementById("todayPauses").textContent   = s.pauses;
+    document.getElementById("todayActive").textContent   = getActiveDays(1) + "/1";
 }
 
 // ============================================================
@@ -1104,9 +1163,11 @@ function getPeriodStats(days) {
 }
 
 function updatePeriodStats() {
-    const week  = getPeriodStats(7);
-    const month = getPeriodStats(30);
-    const year  = getPeriodStats(365);
+    const week       = getPeriodStats(7);
+    const month      = getPeriodStats(30);
+    const threeMonth = getPeriodStats(91);
+    const sixMonth   = getPeriodStats(182);
+    const year       = getPeriodStats(365);
 
     const fmt = (s) => new Date(s * 1000).toISOString().slice(11, 19);
 
@@ -1124,29 +1185,86 @@ function updatePeriodStats() {
     document.getElementById("monthSessions").textContent = month.sess;
     document.getElementById("monthPauses").textContent   = month.pauses;
 
+    document.getElementById("threeMonthDist").textContent     = threeMonth.dist.toFixed(2);
+    document.getElementById("threeMonthCal").textContent      = Math.round(threeMonth.cal);
+    document.getElementById("threeMonthTime").textContent     = fmt(threeMonth.time);
+    document.getElementById("threeMonthAvgSpd").textContent   = threeMonth.avgSpeed.toFixed(2);
+    document.getElementById("threeMonthSessions").textContent = threeMonth.sess;
+    document.getElementById("threeMonthPauses").textContent   = threeMonth.pauses;
+
+    document.getElementById("sixMonthDist").textContent     = sixMonth.dist.toFixed(2);
+    document.getElementById("sixMonthCal").textContent      = Math.round(sixMonth.cal);
+    document.getElementById("sixMonthTime").textContent     = fmt(sixMonth.time);
+    document.getElementById("sixMonthAvgSpd").textContent   = sixMonth.avgSpeed.toFixed(2);
+    document.getElementById("sixMonthSessions").textContent = sixMonth.sess;
+    document.getElementById("sixMonthPauses").textContent   = sixMonth.pauses;
+
     document.getElementById("yearDist").textContent     = year.dist.toFixed(2);
     document.getElementById("yearCal").textContent      = Math.round(year.cal);
     document.getElementById("yearTime").textContent     = fmt(year.time);
     document.getElementById("yearAvgSpd").textContent   = year.avgSpeed.toFixed(2);
     document.getElementById("yearSessions").textContent = year.sess;
     document.getElementById("yearPauses").textContent   = year.pauses;
+
+    document.getElementById("weekActive").textContent       = getActiveDays(7) + "/7";
+    document.getElementById("monthActive").textContent      = getActiveDays(30) + "/30";
+    document.getElementById("threeMonthActive").textContent = getActiveDays(91) + "/91";
+    document.getElementById("sixMonthActive").textContent   = getActiveDays(182) + "/182";
+    document.getElementById("yearActive").textContent       = getActiveDays(365) + "/365";
 }
 
 function getAllTimeExtras() {
     const history = JSON.parse(localStorage.getItem("wp_history") || "{}");
     let bestDayDist = 0, bestDayDate = null, totalSessions = 0;
+    let bestAvgSpeed = 0, bestAvgSpeedDate = null;
     Object.entries(history).forEach(([date, d]) => {
         if ((d.distance || 0) > bestDayDist) { bestDayDist = d.distance; bestDayDate = date; }
         totalSessions += d.sessions || 0;
+        if ((d.avgSpeed || 0) > bestAvgSpeed) { bestAvgSpeed = d.avgSpeed; bestAvgSpeedDate = date; }
     });
-    return { bestDayDist, bestDayDate, totalSessions };
+    return { bestDayDist, bestDayDate, totalSessions, bestAvgSpeed, bestAvgSpeedDate };
+}
+
+function getStreak() {
+    const history = JSON.parse(localStorage.getItem("wp_history") || "{}");
+    const todayKey = new Date().toISOString().slice(0, 10);
+    const todayActive = (history[todayKey] && (history[todayKey].distance || 0) > 0) || cumDistance > 0;
+    const d = new Date();
+    if (!todayActive) d.setDate(d.getDate() - 1);
+    let streak = 0;
+    while (streak < 365) {
+        const key = d.toISOString().slice(0, 10);
+        const active = key === todayKey ? todayActive : (history[key] && (history[key].distance || 0) > 0);
+        if (active) { streak++; d.setDate(d.getDate() - 1); }
+        else break;
+    }
+    return streak;
+}
+
+function getActiveDays(days) {
+    const history = JSON.parse(localStorage.getItem("wp_history") || "{}");
+    const todayKey = new Date().toISOString().slice(0, 10);
+    const todayActive = (history[todayKey] && (history[todayKey].distance || 0) > 0) || cumDistance > 0;
+    let count = 0;
+    const d = new Date();
+    for (let i = 0; i < days; i++) {
+        const key = d.toISOString().slice(0, 10);
+        const active = key === todayKey ? todayActive : (history[key] && (history[key].distance || 0) > 0);
+        if (active) count++;
+        d.setDate(d.getDate() - 1);
+    }
+    return count;
 }
 
 function updateAllTimeExtras() {
-    const { bestDayDist, bestDayDate, totalSessions } = getAllTimeExtras();
+    const { bestDayDist, bestDayDate, totalSessions, bestAvgSpeed, bestAvgSpeedDate } = getAllTimeExtras();
     document.getElementById("allTimeBestDay").textContent =
         bestDayDate ? `${bestDayDist.toFixed(2)} km (${bestDayDate})` : "—";
     document.getElementById("allTimeTotalSessions").textContent = totalSessions;
+    document.getElementById("allTimeStreak").textContent = getStreak() + " days";
+    document.getElementById("allTimeActive30").textContent = getActiveDays(30) + "/30";
+    document.getElementById("allTimeBestAvgSpeed").textContent =
+        bestAvgSpeedDate ? `${bestAvgSpeed.toFixed(2)} km/h (${bestAvgSpeedDate})` : "—";
 }
 
 // ============================================================
@@ -1187,12 +1305,6 @@ function toggleSection(contentId, chevronId) {
     document.getElementById(chevronId).classList.toggle("rotate-180");
 }
 
-function toggleTotalsMore() {
-    document.getElementById("cumMoreStats").classList.toggle("hidden");
-    document.getElementById("cumMoreChevron").classList.toggle("rotate-180");
-    const label = document.getElementById("cumMoreLabel");
-    label.textContent = label.textContent === "Show more" ? "Show less" : "Show more";
-}
 
 // ============================================================
 // Light/Dark Mode
@@ -1242,7 +1354,7 @@ setInterval(() => {
     const dt    = (now - lastDistanceUpdate) / 3600000;
 
     autoBackupTick++;
-    if (autoBackupTick % 30 === 0 && cumDistance > 0 && (isRunning || isPaused)) {
+    if (autoBackupTick % 10 === 0 && cumDistance > 0 && (isRunning || isPaused)) {
         saveSessionBackup();
     }
 
@@ -1259,14 +1371,10 @@ setInterval(() => {
     if (document.getElementById("currentSteps")) document.getElementById("currentSteps").textContent = currentStepsEst;
     const cumStepsEst = estimateSteps(cumEstimatedDistance, heightInput);
     if (document.getElementById("cumSteps")) document.getElementById("cumSteps").textContent = cumStepsEst;
-    if (document.getElementById("cumEstimatedDistance")) document.getElementById("cumEstimatedDistance").textContent = cumEstimatedDistance.toFixed(2);
 
     const powerThisSecond = estimatePower(currentSpeed, userWeight);
     cumPower = powerThisSecond;
     if (isRunning) cumTotalPower += powerThisSecond;
-    if (document.getElementById("cumPower")) document.getElementById("cumPower").textContent = cumPower;
-    if (document.getElementById("cumTotalPower")) document.getElementById("cumTotalPower").textContent = cumTotalPower;
-
     if (isRunning) updateLiveSpeedChart();
 }, 1000);
 
@@ -1395,6 +1503,45 @@ document.getElementById("closeGoalsBtn").addEventListener("click", () => {
     document.getElementById("goalsModal").classList.add("hidden");
 });
 
+document.querySelectorAll(".trend-tab-btn").forEach(btn => {
+    btn.addEventListener("click", function () {
+        document.querySelectorAll(".trend-tab-btn").forEach(b => {
+            b.classList.remove("bg-sporty", "text-white");
+            b.classList.add("bg-gray-200", "dark:bg-gray-700", "text-gray-700", "dark:text-gray-300");
+        });
+        this.classList.add("bg-sporty", "text-white");
+        this.classList.remove("bg-gray-200", "dark:bg-gray-700", "text-gray-700", "dark:text-gray-300");
+        // Use inline style so mobile tabs don't conflict with desktop md:block classes
+        ["distance", "calories", "speed"].forEach(c => {
+            document.getElementById("trendChartWrap-" + c).style.display =
+                c !== this.dataset.chart ? "none" : "";
+        });
+        const map = { distance: wpCharts.distance, calories: wpCharts.calories, speed: wpCharts.speedHist };
+        if (map[this.dataset.chart]) map[this.dataset.chart].resize();
+    });
+});
+
+document.querySelectorAll(".goal-tab-btn").forEach(btn => {
+    btn.addEventListener("click", function () {
+        document.querySelectorAll(".goal-tab-btn").forEach(b => {
+            b.classList.remove("bg-sporty", "text-white");
+            b.classList.add("bg-gray-200", "dark:bg-gray-700", "text-gray-700", "dark:text-gray-300");
+        });
+        this.classList.add("bg-sporty", "text-white");
+        this.classList.remove("bg-gray-200", "dark:bg-gray-700", "text-gray-700", "dark:text-gray-300");
+        ["daily", "weekly", "monthly", "threemonth", "sixmonth", "yearly"].forEach(tab => {
+            const el = document.getElementById("goalGroup-" + tab);
+            if (tab === this.dataset.tab) {
+                el.classList.remove("hidden");
+                el.classList.add("flex", "flex-col");
+            } else {
+                el.classList.add("hidden");
+                el.classList.remove("flex", "flex-col");
+            }
+        });
+    });
+});
+
 ["settingsModal", "goalsModal", "continueModal", "recoverModal", "clearConfirmModal"].forEach(id => {
     document.getElementById(id).addEventListener("click", function (e) {
         if (e.target === this) this.classList.add("hidden");
@@ -1448,6 +1595,38 @@ document.getElementById("goalMonthTimeSlider").addEventListener("input", functio
     goalMonthTimeSeconds = mins * 60;
     localStorage.setItem("wp_goal_month_time_seconds", goalMonthTimeSeconds);
     document.getElementById("goalMonthTimeDisplay").textContent = mins > 0 ? formatHHMM(goalMonthTimeSeconds) : "—";
+    updateGoalProgress();
+});
+
+document.getElementById("goalThreeMonthDistanceSlider").addEventListener("input", function() {
+    const val = parseFloat(this.value);
+    goalThreeMonthDistanceKm = val;
+    localStorage.setItem("wp_goal_threemonth_distance", val);
+    document.getElementById("goalThreeMonthDistanceDisplay").textContent = val > 0 ? val.toFixed(1) : "—";
+    updateGoalProgress();
+});
+
+document.getElementById("goalThreeMonthTimeSlider").addEventListener("input", function() {
+    const mins = parseInt(this.value);
+    goalThreeMonthTimeSeconds = mins * 60;
+    localStorage.setItem("wp_goal_threemonth_time_seconds", goalThreeMonthTimeSeconds);
+    document.getElementById("goalThreeMonthTimeDisplay").textContent = mins > 0 ? formatHHMM(goalThreeMonthTimeSeconds) : "—";
+    updateGoalProgress();
+});
+
+document.getElementById("goalSixMonthDistanceSlider").addEventListener("input", function() {
+    const val = parseFloat(this.value);
+    goalSixMonthDistanceKm = val;
+    localStorage.setItem("wp_goal_sixmonth_distance", val);
+    document.getElementById("goalSixMonthDistanceDisplay").textContent = val > 0 ? val.toFixed(1) : "—";
+    updateGoalProgress();
+});
+
+document.getElementById("goalSixMonthTimeSlider").addEventListener("input", function() {
+    const mins = parseInt(this.value);
+    goalSixMonthTimeSeconds = mins * 60;
+    localStorage.setItem("wp_goal_sixmonth_time_seconds", goalSixMonthTimeSeconds);
+    document.getElementById("goalSixMonthTimeDisplay").textContent = mins > 0 ? formatHHMM(goalSixMonthTimeSeconds) : "—";
     updateGoalProgress();
 });
 
