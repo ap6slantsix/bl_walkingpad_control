@@ -1,6 +1,6 @@
 "use strict";
-const CACHE = "walkpad-v7";
-const ASSETS = ["./", "./index.html", "./script.js", "./manifest.json", "./icon.svg"];
+const CACHE = "walkpad-v9";
+const ASSETS = ["./", "./index.html", "./script.js", "./manifest.json", "./icon.svg", "./tailwind.js"];
 
 self.addEventListener("install", e => {
     e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)));
