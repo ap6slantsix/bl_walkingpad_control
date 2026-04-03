@@ -1,10 +1,15 @@
 "use strict";
 
 // --- BLE Constants (FTMS only) ---
-const FTMS_SERVICE    = "00001826-0000-1000-8000-00805f9b34fb";
-const FTMS_CONTROL    = "00002ad9-0000-1000-8000-00805f9b34fb";
-const FTMS_TREADMILL  = "00002acd-0000-1000-8000-00805f9b34fb";
-const FTMS_STATUS     = "00002ada-0000-1000-8000-00805f9b34fb";
+const FTMS_SERVICE = "00001826-0000-1000-8000-00805f9b34fb";
+const FTMS_CONTROL = "00002ad9-0000-1000-8000-00805f9b34fb";
+const FTMS_TREADMILL = "00002acd-0000-1000-8000-00805f9b34fb";
+const FTMS_STATUS = "00002ada-0000-1000-8000-00805f9b34fb";
+
+// --- Timing Constants ---
+const STARTUP_NO_CONNECTION_DISMISS_MS = 4000; // how long to show "not connected" message
+const STARTUP_ABORT_TIMEOUT_MS = 15000; // max wait before giving up on startup sequence
+const BELT_SPEED_SET_DELAY_MS = 2500; // pad ramp-up time before sending target speed
 
 // --- Wake Lock ---
 let wakeLock = null;
@@ -13,14 +18,19 @@ async function requestWakeLock() {
     if (!("wakeLock" in navigator)) return;
     try {
         wakeLock = await navigator.wakeLock.request("screen");
-        wakeLock.addEventListener("release", () => { wakeLock = null; });
+        wakeLock.addEventListener("release", () => {
+            wakeLock = null;
+        });
     } catch (e) {
         console.warn("Wake lock failed:", e);
     }
 }
 
 function releaseWakeLock() {
-    if (wakeLock) { wakeLock.release(); wakeLock = null; }
+    if (wakeLock) {
+        wakeLock.release();
+        wakeLock = null;
+    }
 }
 
 // --- Haptic ---
@@ -30,12 +40,130 @@ function haptic(pattern = 50) {
 
 // --- BLE State ---
 let device, server;
-let ftmsService = null, cFTMSControl = null, cFTMSTreadmill = null, cFTMSStatus = null;
+let ftmsService = null,
+    cFTMSControl = null,
+    cFTMSTreadmill = null,
+    cFTMSStatus = null;
 let isRunning = false;
 let isPaused = false;
+let historyView = "day"; // "day" or "session"
 let lastSpeed = 1.0;
 let isConnected = false;
+let reconnectAttempts = 0;
+let reconnectTimer = null;
 let pendingResumeSpeed = 0; // set on resume; applied on first running notification
+let sessionStartTime = null; // ISO string, set on first opcode 0x04 each session
+
+// --- Startup Indicator ---
+let startupDismissTimer = null;
+let startupHasSpeedStep = false;
+let startupBeltConfirmed = false;
+let startupBeltPackets = 0; // treadmill packets received during belt ramp-up
+
+function showStartupIndicator(targetSpeed) {
+    clearTimeout(startupDismissTimer);
+    const el = document.getElementById("startupIndicator");
+    el.classList.remove("hidden");
+
+    if (!cFTMSControl) {
+        document.getElementById("startupHeaderIcon").className =
+            "fas fa-times-circle text-red-400";
+        document
+            .getElementById("startup-no-connection")
+            .classList.replace("hidden", "flex");
+        document.getElementById("startup-steps").classList.add("hidden");
+        startupDismissTimer = setTimeout(() => {
+            el.classList.add("hidden");
+            document
+                .getElementById("startup-no-connection")
+                .classList.replace("flex", "hidden");
+            document.getElementById("startup-steps").classList.remove("hidden");
+        }, STARTUP_NO_CONNECTION_DISMISS_MS);
+        return;
+    }
+
+    startupHasSpeedStep = targetSpeed > 0;
+    startupBeltConfirmed = false;
+    startupBeltPackets = 0;
+    document.getElementById("startupHeaderIcon").className =
+        "fas fa-circle-notch fa-spin";
+    // Safety: abort if startup hasn't completed within 15 seconds
+    startupDismissTimer = setTimeout(
+        () => abortStartupIndicator("Timed out"),
+        STARTUP_ABORT_TIMEOUT_MS,
+    );
+    setStartupStep("step-cmd", "done", "Start command sent");
+    setStartupStep("step-ack", "active", "Waiting for pad acknowledgement…");
+    setStartupStep("step-belt", "pending", "Belt starting");
+    const speedStep = document.getElementById("step-speed");
+    if (startupHasSpeedStep) {
+        speedStep.classList.remove("hidden");
+        setStartupStep(
+            "step-speed",
+            "pending",
+            `Set speed to ${targetSpeed.toFixed(1)} km/h`,
+        );
+    } else {
+        speedStep.classList.add("hidden");
+    }
+}
+
+function setStartupStep(id, state, text) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const icon = el.querySelector("i");
+    const span = el.querySelector("span");
+    icon.className = "fas w-4 text-center";
+    switch (state) {
+        case "done":
+            icon.classList.add("fa-check-circle", "text-green-400");
+            break;
+        case "active":
+            icon.classList.add("fa-circle-notch", "fa-spin", "text-yellow-400");
+            break;
+        case "pending":
+            icon.classList.add("fa-circle", "text-gray-500");
+            break;
+        case "error":
+            icon.classList.add("fa-times-circle", "text-red-400");
+            break;
+    }
+    span.textContent = text;
+    span.className = state === "pending" ? "text-gray-500" : "text-white";
+}
+
+function dismissStartupIndicator() {
+    clearTimeout(startupDismissTimer);
+    document.getElementById("startupHeaderIcon").className =
+        "fas fa-check text-green-400";
+    startupDismissTimer = setTimeout(() => {
+        document.getElementById("startupIndicator").classList.add("hidden");
+    }, 2000);
+}
+
+function abortStartupIndicator(reason) {
+    clearTimeout(startupDismissTimer);
+    const el = document.getElementById("startupIndicator");
+    if (el.classList.contains("hidden")) return;
+    document.getElementById("startupHeaderIcon").className =
+        "fas fa-times-circle text-red-400";
+    // Mark any still-pending/active step as the error
+    ["step-ack", "step-belt", "step-speed"].forEach((id) => {
+        const step = document.getElementById(id);
+        if (!step || step.classList.contains("hidden")) return;
+        const icon = step.querySelector("i");
+        if (
+            icon &&
+            (icon.classList.contains("fa-spin") ||
+                icon.classList.contains("fa-circle"))
+        ) {
+            setStartupStep(id, "error", reason);
+        }
+    });
+    startupDismissTimer = setTimeout(() => {
+        el.classList.add("hidden");
+    }, 3000);
+}
 
 // --- Current Session Stats ---
 let currentSpeed = 0;
@@ -68,7 +196,8 @@ let prevTimeSeconds = 0;
 
 // --- User Profile ---
 let userWeight = 80;
-let userHeight = "5'8\"";
+let userHeightCm = 173;
+let userHeightUnit = "ftin"; // "ftin" or "cm"
 let userAge = 25;
 let currentPower = 0;
 let currentSteps = 0;
@@ -119,18 +248,38 @@ function applyCardHidden(id, hidden) {
 }
 
 function loadCardState() {
-    cardCollapsed = JSON.parse(localStorage.getItem("wp_card_collapsed") || "{}");
+    cardCollapsed = JSON.parse(
+        localStorage.getItem("wp_card_collapsed") || "{}",
+    );
     cardHidden = JSON.parse(localStorage.getItem("wp_card_hidden") || "{}");
-    ["session", "period1", "period2", "alltime", "livespeed", "trends", "history"].forEach(id => {
+    [
+        "session",
+        "period1",
+        "period2",
+        "alltime",
+        "livespeed",
+        "trends",
+        "history",
+    ].forEach((id) => {
         applyCardCollapsed(id, cardCollapsed[id] || false);
         applyCardHidden(id, cardHidden[id] || false);
         const cb = document.getElementById("show-card-" + id);
         if (cb) cb.checked = !cardHidden[id];
     });
-    document.querySelectorAll(".card-collapse-btn").forEach(btn => {
-        btn.addEventListener("click", () => toggleCardCollapse(btn.dataset.card));
+    document.querySelectorAll(".card-collapse-btn").forEach((btn) => {
+        btn.addEventListener("click", () =>
+            toggleCardCollapse(btn.dataset.card),
+        );
     });
-    ["session", "period1", "period2", "alltime", "livespeed", "trends", "history"].forEach(id => {
+    [
+        "session",
+        "period1",
+        "period2",
+        "alltime",
+        "livespeed",
+        "trends",
+        "history",
+    ].forEach((id) => {
         const cb = document.getElementById("show-card-" + id);
         if (!cb) return;
         cb.addEventListener("change", function () {
@@ -142,10 +291,14 @@ function loadCardState() {
 }
 
 // --- Goals ---
-let goalDistanceKm = 0;
-let goalTimeSeconds = 0;
+let goalActiveDays = 5;
+let goalDistanceKm = 5;
+let goalTimeSeconds = 1800;
 let goalWeekDistanceKm = 0;
 let goalWeekTimeSeconds = 0;
+let goalDaySessions = 1;
+let goalWeekSessions = 5;
+let goalMonthSessions = 0;
 let goalMonthDistanceKm = 0;
 let goalMonthTimeSeconds = 0;
 let goalThreeMonthDistanceKm = 0;
@@ -154,6 +307,12 @@ let goalSixMonthDistanceKm = 0;
 let goalSixMonthTimeSeconds = 0;
 let goalYearDistanceKm = 0;
 let goalYearTimeSeconds = 0;
+// Auto-calculate flags — true = period goals are driven by daily × active days
+let autoWeek = true,
+    autoMonth = true,
+    autoThreeMonth = true,
+    autoSixMonth = true,
+    autoYear = true;
 
 // --- History save baseline (to avoid double-counting on multiple stops) ---
 let lastHistoryDistance = 0;
@@ -162,9 +321,15 @@ let lastHistorySpeedSum = 0;
 let lastHistorySpeedSamples = 0;
 let lastHistoryTimeSeconds = 0;
 let lastHistoryPauseCount = 0;
+let lastHistorySteps = 0;
 
 // --- Chart Instances ---
-const wpCharts = { distance: null, calories: null, speedHist: null, liveSpeed: null };
+const wpCharts = {
+    distance: null,
+    calories: null,
+    speedHist: null,
+    liveSpeed: null,
+};
 
 // --- Live Speed Chart Data ---
 let liveChartMax = 60;
@@ -181,7 +346,12 @@ function setStatus(text, dotClass) {
     document.getElementById("status").textContent = text;
     const dot = document.getElementById("statusDot");
     if (dot) {
-        dot.classList.remove("bg-red-500", "bg-green-500", "bg-yellow-400", "bg-orange-400");
+        dot.classList.remove(
+            "bg-red-500",
+            "bg-green-500",
+            "bg-yellow-400",
+            "bg-orange-400",
+        );
         dot.classList.add(dotClass);
     }
 }
@@ -192,15 +362,20 @@ function setStatus(text, dotClass) {
 
 function ftmsSpeedBytes(kmh) {
     const val = Math.round(kmh * 100); // 0.01 km/h units
-    return [0x02, val & 0xFF, (val >> 8) & 0xFF]; // opcode 0x02 = Set Target Speed (FitShow FS-BT-D2)
+    return [0x02, val & 0xff, (val >> 8) & 0xff]; // opcode 0x02 = Set Target Speed (FitShow FS-BT-D2)
 }
 
 async function ftmsCmd(bytes) {
-    if (!cFTMSControl) { console.warn("FTMS not connected"); return; }
+    if (!cFTMSControl) {
+        console.warn("FTMS not connected");
+        abortStartupIndicator("Not connected");
+        return;
+    }
     try {
         await cFTMSControl.writeValue(new Uint8Array(bytes));
     } catch (e) {
         console.error("FTMS write failed", e);
+        abortStartupIndicator("Write failed");
     }
 }
 
@@ -224,20 +399,60 @@ function handleFTMSTreadmill(event) {
     const value = event.target.value;
     if (value.byteLength < 19) return;
 
-    const speed    = value.getUint16(2, true) / 100;
-    const distanceM = value.getUint8(4) | (value.getUint8(5) << 8) | (value.getUint8(6) << 16);
-    const distance  = distanceM / 1000;
-    const calories  = value.getUint16(11, true);
-    const elapsed   = value.getUint16(17, true);
+    const speed = value.getUint16(2, true) / 100;
+    const distanceM =
+        value.getUint8(4) |
+        (value.getUint8(5) << 8) |
+        (value.getUint8(6) << 16);
+    const distance = distanceM / 1000;
+    const calories = value.getUint16(11, true);
+    const elapsed = value.getUint16(17, true);
+
+    // Countdown display during belt ramp-up (packets arrive ~1s apart, pad beeps 3x before belt moves)
+    if (
+        isRunning &&
+        !startupBeltConfirmed &&
+        !document
+            .getElementById("startupIndicator")
+            .classList.contains("hidden")
+    ) {
+        if (speed <= 0) {
+            startupBeltPackets++;
+            const labels = ["Ready…", "Get set…", "Go!"];
+            const label =
+                labels[Math.min(startupBeltPackets - 1, labels.length - 1)];
+            setStartupStep("step-belt", "active", label);
+        }
+    }
 
     // Only accumulate stats when belt is actually running at speed
     if (!isRunning || speed <= 0) return;
+
+    // Confirm belt is physically moving on first packet with speed > 0
+    if (!startupBeltConfirmed) {
+        startupBeltConfirmed = true;
+        setStartupStep("step-belt", "done", "Belt running");
+        if (!startupHasSpeedStep) dismissStartupIndicator();
+    }
 
     // Apply pending resume speed on first notification after start/resume
     if (pendingResumeSpeed > 0) {
         const targetSpeed = pendingResumeSpeed;
         pendingResumeSpeed = 0;
-        setTimeout(() => ftmsCmd(ftmsSpeedBytes(targetSpeed)), 2500);
+        setStartupStep(
+            "step-speed",
+            "active",
+            `Setting speed to ${targetSpeed.toFixed(1)} km/h…`,
+        );
+        setTimeout(() => {
+            ftmsCmd(ftmsSpeedBytes(targetSpeed));
+            setStartupStep(
+                "step-speed",
+                "done",
+                `Speed set to ${targetSpeed.toFixed(1)} km/h`,
+            );
+            dismissStartupIndicator();
+        }, BELT_SPEED_SET_DELAY_MS);
     }
 
     currentSpeed = speed;
@@ -245,16 +460,16 @@ function handleFTMSTreadmill(event) {
     speedSum += currentSpeed;
     speedSamples++;
 
-    currentDistance    = distance;
-    currentCalories    = calories;
+    currentDistance = distance;
+    currentCalories = calories;
     currentTimeSeconds = elapsed;
 
-    cumDistance    += Math.max(0, currentDistance    - prevDistance);
-    cumCalories    += Math.max(0, currentCalories    - prevCalories);
+    cumDistance += Math.max(0, currentDistance - prevDistance);
+    cumCalories += Math.max(0, currentCalories - prevCalories);
     cumTimeSeconds += Math.max(0, currentTimeSeconds - prevTimeSeconds);
 
-    prevDistance    = currentDistance;
-    prevCalories    = currentCalories;
+    prevDistance = currentDistance;
+    prevCalories = currentCalories;
     prevTimeSeconds = currentTimeSeconds;
 
     updateCurrentStats();
@@ -274,18 +489,24 @@ function handleFTMSStatus(event) {
     if (opcode === 0x04) {
         // Belt started or resumed
         isRunning = true;
-        isPaused  = false;
+        isPaused = false;
+        if (!sessionStartTime) sessionStartTime = new Date().toISOString();
         setStatus("Running", "bg-green-500");
         requestWakeLock();
-    } else if (opcode === 0x02 && value.byteLength >= 2 && value.getUint8(1) === 0x01) {
+        setStartupStep("step-belt", "active", "Belt starting…");
+    } else if (
+        opcode === 0x02 &&
+        value.byteLength >= 2 &&
+        value.getUint8(1) === 0x01
+    ) {
         // Belt fully stopped — pad resets its internal counters to 0 at this point
         isRunning = false;
         currentSpeed = 0;
         estimatedDistanceKm = 0;
         lastDistanceUpdate = Date.now();
         // Reset prev values so next session's first packet doesn't produce a negative delta
-        prevDistance    = 0;
-        prevCalories    = 0;
+        prevDistance = 0;
+        prevCalories = 0;
         prevTimeSeconds = 0;
         localStorage.setItem("wp_isPaused", isPaused ? "1" : "0");
         localStorage.setItem("wp_pauseStartTimestamp", "");
@@ -295,6 +516,9 @@ function handleFTMSStatus(event) {
             isPaused = false;
             setStatus("Stopped", "bg-orange-400");
             releaseWakeLock();
+            updateCurrentStats();
+            exportStats().then(() => clearCurrentStats());
+            return;
         }
         updateCurrentStats();
     }
@@ -305,15 +529,34 @@ function handleFTMSIndication(event) {
     const value = event.target.value;
     const bytes = [];
     for (let i = 0; i < value.byteLength; i++) bytes.push(value.getUint8(i));
-    const hex = bytes.map(b => b.toString(16).padStart(2, "0").toUpperCase()).join(" ");
+    const hex = bytes
+        .map((b) => b.toString(16).padStart(2, "0").toUpperCase())
+        .join(" ");
     if (bytes[0] === 0x80) {
-        const results = { 0x01: "Success", 0x02: "Op Code Not Supported", 0x03: "Invalid Parameter",
-                          0x04: "Operation Failed", 0x05: "Control Not Permitted" };
-        const ops = { 0x01: "Request Control", 0x02: "Set Speed",
-                      0x07: "Start/Resume", 0x08: "Stop/Pause" };
-        const op  = ops[bytes[1]]    || "0x" + bytes[1].toString(16);
+        const results = {
+            0x01: "Success",
+            0x02: "Op Code Not Supported",
+            0x03: "Invalid Parameter",
+            0x04: "Operation Failed",
+            0x05: "Control Not Permitted",
+        };
+        const ops = {
+            0x01: "Request Control",
+            0x02: "Set Speed",
+            0x07: "Start/Resume",
+            0x08: "Stop/Pause",
+        };
+        const op = ops[bytes[1]] || "0x" + bytes[1].toString(16);
         const res = results[bytes[2]] || "0x" + bytes[2].toString(16);
         console.log("[FTMS indication]", hex, "→", op + ":", res);
+        if (bytes[1] === 0x07) {
+            if (bytes[2] === 0x01) {
+                setStartupStep("step-ack", "done", "Pad acknowledged");
+                setStartupStep("step-belt", "active", "Belt starting…");
+            } else {
+                setStartupStep("step-ack", "error", `Start failed: ${res}`);
+            }
+        }
     } else {
         console.log("[FTMS indication]", hex);
     }
@@ -323,69 +566,102 @@ function handleFTMSIndication(event) {
 // BLE Init / Disconnect
 // ============================================================
 
+async function connectToDevice() {
+    console.log("[BLE] connectToDevice: gatt.connect →", device.id, device.name);
+    server = await device.gatt.connect();
+    console.log("[BLE] GATT connected, discovering services…");
+    ftmsService = await server.getPrimaryService(FTMS_SERVICE);
+    cFTMSControl = await ftmsService.getCharacteristic(FTMS_CONTROL);
+    cFTMSTreadmill = await ftmsService.getCharacteristic(FTMS_TREADMILL);
+    cFTMSStatus = await ftmsService.getCharacteristic(FTMS_STATUS);
+    console.log("[BLE] Characteristics obtained, starting notifications…");
+
+    await cFTMSControl.startNotifications();
+    cFTMSControl.removeEventListener("characteristicvaluechanged", handleFTMSIndication);
+    cFTMSControl.addEventListener("characteristicvaluechanged", handleFTMSIndication);
+
+    await cFTMSTreadmill.startNotifications();
+    cFTMSTreadmill.removeEventListener("characteristicvaluechanged", handleFTMSTreadmill);
+    cFTMSTreadmill.addEventListener("characteristicvaluechanged", handleFTMSTreadmill);
+
+    await cFTMSStatus.startNotifications();
+    cFTMSStatus.removeEventListener("characteristicvaluechanged", handleFTMSStatus);
+    cFTMSStatus.addEventListener("characteristicvaluechanged", handleFTMSStatus);
+
+    isConnected = true;
+    reconnectAttempts = 0;
+    if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+    console.log("[BLE] Connected ✓", device.id, device.name);
+    setStatus("Connected", "bg-green-500");
+    // Request FTMS control after a short delay to let the pad settle
+    setTimeout(() => ftmsCmd([0x01]), 600);
+}
+
 async function initBLE() {
+    console.log("[BLE] initBLE called, device=", device?.id ?? "null");
+    if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+    reconnectAttempts = 0;
     try {
         setStatus("Connecting…", "bg-yellow-400");
-
         if (!device) {
-            if (navigator.bluetooth.getDevices) {
-                const permitted = await navigator.bluetooth.getDevices();
-                device = permitted.find(d => d.name && d.name.startsWith("FS-"));
-            }
-            if (!device) {
-                device = await navigator.bluetooth.requestDevice({
-                    filters: [{ namePrefix: "FS-" }],
-                    optionalServices: [FTMS_SERVICE],
-                });
-            }
+            console.log("[BLE] Showing requestDevice picker");
+            device = await navigator.bluetooth.requestDevice({
+                filters: [{ namePrefix: "FS-" }],
+                optionalServices: [FTMS_SERVICE],
+            });
+            console.log("[BLE] User selected:", device.id, device.name);
             device.addEventListener("gattserverdisconnected", onDisconnected);
         }
-
-        server = await device.gatt.connect();
-
-        if (!ftmsService)    ftmsService    = await server.getPrimaryService(FTMS_SERVICE);
-        if (!cFTMSControl)   cFTMSControl   = await ftmsService.getCharacteristic(FTMS_CONTROL);
-        if (!cFTMSTreadmill) cFTMSTreadmill = await ftmsService.getCharacteristic(FTMS_TREADMILL);
-        if (!cFTMSStatus)    cFTMSStatus    = await ftmsService.getCharacteristic(FTMS_STATUS);
-
-        await cFTMSControl.startNotifications();
-        cFTMSControl.removeEventListener("characteristicvaluechanged", handleFTMSIndication);
-        cFTMSControl.addEventListener("characteristicvaluechanged", handleFTMSIndication);
-
-        await cFTMSTreadmill.startNotifications();
-        cFTMSTreadmill.removeEventListener("characteristicvaluechanged", handleFTMSTreadmill);
-        cFTMSTreadmill.addEventListener("characteristicvaluechanged", handleFTMSTreadmill);
-
-        await cFTMSStatus.startNotifications();
-        cFTMSStatus.removeEventListener("characteristicvaluechanged", handleFTMSStatus);
-        cFTMSStatus.addEventListener("characteristicvaluechanged", handleFTMSStatus);
-
-        isConnected = true;
-        setStatus("Connected", "bg-green-500");
-
-        // Request FTMS control after a short delay to let the pad settle
-        setTimeout(() => ftmsCmd([0x01]), 600);
-
+        await connectToDevice();
     } catch (e) {
         if (e.name === "NotFoundError") {
+            console.log("[BLE] User cancelled picker");
             setStatus("Disconnected", "bg-red-500");
         } else {
-            console.error("BLE init failed", e);
+            console.error("[BLE] initBLE failed:", e);
             setStatus("Connection failed", "bg-red-500");
         }
     }
 }
 
-function onDisconnected() {
-    isConnected    = false;
-    ftmsService    = null;
-    cFTMSControl   = null;
-    cFTMSTreadmill = null;
-    cFTMSStatus    = null;
-    releaseWakeLock();
-    setStatus("Reconnecting…", "bg-yellow-400");
-    setTimeout(() => { if (!isConnected && device) initBLE(); }, 2000);
+const RECONNECT_DELAYS = [2000, 3000, 5000, 10000, 15000, 30000];
+const MAX_RECONNECT_ATTEMPTS = 10;
+
+function scheduleReconnect() {
+    if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+        console.log("[BLE] Max reconnect attempts reached, giving up");
+        setStatus("Connection lost", "bg-red-500");
+        reconnectAttempts = 0;
+        return;
+    }
+    const delay = RECONNECT_DELAYS[Math.min(reconnectAttempts, RECONNECT_DELAYS.length - 1)];
+    reconnectAttempts++;
+    console.log(`[BLE] scheduleReconnect: attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS} in ${delay}ms`);
+    reconnectTimer = setTimeout(async () => {
+        if (isConnected || !device) return;
+        try {
+            setStatus("Reconnecting…", "bg-yellow-400");
+            await connectToDevice();
+        } catch (e) {
+            console.warn("[BLE] Reconnect attempt failed:", e.message);
+            scheduleReconnect();
+        }
+    }, delay);
 }
+
+function onDisconnected() {
+    console.log("[BLE] onDisconnected fired");
+    isConnected = false;
+    ftmsService = null;
+    cFTMSControl = null;
+    cFTMSTreadmill = null;
+    cFTMSStatus = null;
+    releaseWakeLock();
+    abortStartupIndicator("Disconnected");
+    setStatus("Reconnecting…", "bg-yellow-400");
+    scheduleReconnect();
+}
+
 
 // ============================================================
 // Calculations
@@ -395,17 +671,24 @@ function estimatePower(speed, weight) {
     return Math.round((1.5 * speed * weight) / 3.6);
 }
 
-function getStrideLength(heightFtIn) {
-    const match = heightFtIn.match(/^([0-9]+)'([0-9]+)"?/);
-    if (!match) return 0.762;
-    const feet = parseInt(match[1], 10);
-    const inches = parseInt(match[2], 10);
-    const heightCm = feet * 30.48 + inches * 2.54;
+function cmToFtIn(cm) {
+    const totalInches = cm / 2.54;
+    const ft = Math.floor(totalInches / 12);
+    const inches = Math.round(totalInches % 12);
+    return { ft, inches };
+}
+
+function ftInToCm(ft, inches) {
+    return ft * 30.48 + inches * 2.54;
+}
+
+function getStrideLength(heightCm) {
+    if (!heightCm || heightCm <= 0) return 0.762;
     return (0.415 * heightCm) / 100;
 }
 
-function estimateSteps(distanceKm, heightFtIn) {
-    const stride = getStrideLength(heightFtIn);
+function estimateSteps(distanceKm, heightCm) {
+    const stride = getStrideLength(heightCm);
     if (stride <= 0) return 0;
     return Math.round((distanceKm * 1000) / stride);
 }
@@ -421,21 +704,59 @@ function formatSeconds(sec) {
 // Stats Display
 // ============================================================
 
+function clearCurrentStats() {
+    document.getElementById("currentSpeed").textContent = "0.0";
+    document.getElementById("currentDistance").textContent = "0.00";
+    document.getElementById("currentCalories").textContent = "0";
+    document.getElementById("currentTime").textContent = "00:00:00";
+    document.getElementById("currentMaxSpeed").textContent = "0.0";
+    document.getElementById("currentAvgSpeed").textContent = "0.00";
+    document.getElementById("currentSteps").textContent = "0";
+    document.getElementById("currentPauses").textContent = "0";
+    currentSteps = 0;
+    cumSteps = 0;
+    estimatedDistanceKm = 0;
+    cumEstimatedDistance = 0;
+    sessionStartTime = null;
+    document.getElementById("currentPace").textContent = "—";
+    document.getElementById("currentAvgPace").textContent = "—";
+    const mobileSpeedEl = document.getElementById("mobileCurrentSpeed");
+    if (mobileSpeedEl) mobileSpeedEl.textContent = "0.0";
+}
+
 function updateCurrentStats() {
-    document.getElementById("currentSpeed").textContent = currentSpeed.toFixed(1);
-    document.getElementById("currentDistance").textContent = currentDistance.toFixed(2);
-    currentSteps = estimateSteps(estimatedDistanceKm, userHeight);
-    document.getElementById("currentCalories").textContent = Math.round(currentCalories);
-    document.getElementById("currentTime").textContent = new Date(currentTimeSeconds * 1000).toISOString().slice(11, 19);
-    document.getElementById("currentMaxSpeed").textContent = maxSpeed.toFixed(1);
-    const avgSpeed = speedSamples > 0 ? (speedSum / speedSamples) : 0;
-    document.getElementById("currentAvgSpeed").textContent = avgSpeed.toFixed(2);
+    document.getElementById("currentSpeed").textContent =
+        currentSpeed.toFixed(1);
+    document.getElementById("currentDistance").textContent =
+        cumDistance.toFixed(2);
+    currentSteps = estimateSteps(cumEstimatedDistance, userHeightCm);
+    document.getElementById("currentCalories").textContent =
+        Math.round(cumCalories);
+    document.getElementById("currentTime").textContent = new Date(
+        cumTimeSeconds * 1000,
+    )
+        .toISOString()
+        .slice(11, 19);
+    document.getElementById("currentMaxSpeed").textContent =
+        maxSpeed.toFixed(1);
+    const avgSpeed = speedSamples > 0 ? speedSum / speedSamples : 0;
+    document.getElementById("currentAvgSpeed").textContent =
+        avgSpeed.toFixed(2);
     document.getElementById("currentSteps").textContent = currentSteps;
     document.getElementById("currentPauses").textContent = pauseCount;
-    const pace = currentSpeed > 0 ? (60 / currentSpeed) : 0;
-    const paceStr = pace > 0 ? `${Math.floor(pace)}:${String(Math.round((pace % 1) * 60)).padStart(2, "0")}` : "—";
+    const pace = currentSpeed > 0 ? 60 / currentSpeed : 0;
+    const paceStr =
+        pace > 0
+            ? `${Math.floor(pace)}:${String(Math.round((pace % 1) * 60)).padStart(2, "0")}`
+            : "—";
     document.getElementById("currentPace").textContent = paceStr;
-    const avgPaceStr = avgSpeed > 0 ? (() => { const p = 60 / avgSpeed; return `${Math.floor(p)}:${String(Math.round((p % 1) * 60)).padStart(2, "0")}`; })() : "—";
+    const avgPaceStr =
+        avgSpeed > 0
+            ? (() => {
+                  const p = 60 / avgSpeed;
+                  return `${Math.floor(p)}:${String(Math.round((p % 1) * 60)).padStart(2, "0")}`;
+              })()
+            : "—";
     document.getElementById("currentAvgPace").textContent = avgPaceStr;
     const mobileSpeedEl = document.getElementById("mobileCurrentSpeed");
     if (mobileSpeedEl) mobileSpeedEl.textContent = currentSpeed.toFixed(1);
@@ -443,11 +764,17 @@ function updateCurrentStats() {
 
 function updateCumulativeStats() {
     document.getElementById("cumDistance").textContent = cumDistance.toFixed(2);
-    cumSteps  = estimateSteps(cumEstimatedDistance, userHeight);
-    document.getElementById("cumCalories").textContent = Math.round(cumCalories);
-    document.getElementById("cumTime").textContent = new Date(cumTimeSeconds * 1000).toISOString().slice(11, 19);
+    cumSteps = estimateSteps(cumEstimatedDistance, userHeightCm);
+    document.getElementById("cumCalories").textContent =
+        Math.round(cumCalories);
+    document.getElementById("cumTime").textContent = new Date(
+        cumTimeSeconds * 1000,
+    )
+        .toISOString()
+        .slice(11, 19);
     document.getElementById("cumMaxSpeed").textContent = maxSpeed.toFixed(1);
-    document.getElementById("cumAvgSpeed").textContent = speedSamples > 0 ? (speedSum / speedSamples).toFixed(2) : "0.00";
+    document.getElementById("cumAvgSpeed").textContent =
+        speedSamples > 0 ? (speedSum / speedSamples).toFixed(2) : "0.00";
     document.getElementById("cumPauseCount").textContent = pauseCount;
     document.getElementById("cumSteps").textContent = cumSteps;
     autoSaveCumulativeStats();
@@ -460,6 +787,47 @@ function updateCumulativeStats() {
 // ============================================================
 // Persistence
 // ============================================================
+
+function loadSessions() {
+    try {
+        return JSON.parse(localStorage.getItem("wp_sessions") || "[]");
+    } catch (e) {
+        console.warn("Sessions corrupted, resetting", e);
+        return [];
+    }
+}
+
+function loadHistory() {
+    const sessions = loadSessions();
+    const history = {};
+    sessions.forEach((s) => {
+        const d = s.date;
+        if (!history[d]) {
+            history[d] = {
+                distance: 0,
+                calories: 0,
+                speedSum: 0,
+                speedSamples: 0,
+                timeSeconds: 0,
+                sessions: 0,
+                pauses: 0,
+                steps: 0,
+                maxSpeed: 0,
+            };
+        }
+        history[d].distance += s.distance || 0;
+        history[d].calories += s.calories || 0;
+        history[d].speedSum += s.speedSum || 0;
+        history[d].speedSamples += s.speedSamples || 0;
+        history[d].timeSeconds += s.timeSeconds || 0;
+        history[d].sessions += 1;
+        history[d].pauses += s.pauses || 0;
+        history[d].steps += s.steps || 0;
+        history[d].maxSpeed = Math.max(history[d].maxSpeed, s.maxSpeed || 0);
+        history[d].lastUpdated = s.savedAt;
+    });
+    return history;
+}
 
 function autoSaveCumulativeStats() {
     localStorage.setItem("wp_cumDistance", cumDistance);
@@ -475,13 +843,22 @@ function autoSaveCumulativeStats() {
     localStorage.setItem("wp_lastHistorySpeedSamples", lastHistorySpeedSamples);
     localStorage.setItem("wp_lastHistoryTimeSeconds", lastHistoryTimeSeconds);
     localStorage.setItem("wp_lastHistoryPauseCount", lastHistoryPauseCount);
+    localStorage.setItem("wp_lastHistorySteps", lastHistorySteps);
+    localStorage.setItem("wp_cumEstimatedDistance", cumEstimatedDistance);
 }
 
 function saveSessionBackup() {
     const backup = {
-        cumDistance, cumCalories, cumTimeSeconds,
-        pauseCount, totalPauseTime, cumTotalPower,
-        maxSpeed, speedSum, speedSamples, cumEstimatedDistance,
+        cumDistance,
+        cumCalories,
+        cumTimeSeconds,
+        pauseCount,
+        totalPauseTime,
+        cumTotalPower,
+        maxSpeed,
+        speedSum,
+        speedSamples,
+        cumEstimatedDistance,
         savedAt: new Date().toLocaleString(),
     };
     localStorage.setItem("wp_session_backup", JSON.stringify(backup));
@@ -491,8 +868,12 @@ function saveSessionBackup() {
 function syncRecoveryRow() {
     const row = document.getElementById("recoveryBtnRow");
     const anyVisible =
-        !document.getElementById("recoverExportBtn").classList.contains("hidden") ||
-        !document.getElementById("recoverSessionBtn").classList.contains("hidden");
+        !document
+            .getElementById("recoverExportBtn")
+            .classList.contains("hidden") ||
+        !document
+            .getElementById("recoverSessionBtn")
+            .classList.contains("hidden");
     if (anyVisible) {
         row.classList.remove("hidden");
         row.classList.add("flex");
@@ -503,10 +884,13 @@ function syncRecoveryRow() {
 }
 
 function updateRecoverBtn() {
-    const backup = JSON.parse(localStorage.getItem("wp_session_backup") || "null");
+    const backup = JSON.parse(
+        localStorage.getItem("wp_session_backup") || "null",
+    );
     const btn = document.getElementById("recoverSessionBtn");
     const today = new Date().toLocaleDateString();
-    const isToday = backup && backup.savedAt && backup.savedAt.startsWith(today);
+    const isToday =
+        backup && backup.savedAt && backup.savedAt.startsWith(today);
     if (backup && backup.cumDistance > 0 && isToday) {
         btn.title = `Recover session from ${backup.savedAt} (${backup.cumDistance.toFixed(2)} km)`;
         btn.classList.remove("hidden");
@@ -519,37 +903,39 @@ function updateRecoverBtn() {
 }
 
 function mergeFromSnapshot(snapshot) {
-    cumDistance          += snapshot.cumDistance;
-    cumCalories          += snapshot.cumCalories;
-    cumTimeSeconds       += snapshot.cumTimeSeconds;
-    pauseCount           += snapshot.pauseCount;
-    totalPauseTime       += snapshot.totalPauseTime;
-    cumTotalPower        += snapshot.cumTotalPower;
+    cumDistance += snapshot.cumDistance;
+    cumCalories += snapshot.cumCalories;
+    cumTimeSeconds += snapshot.cumTimeSeconds;
+    pauseCount += snapshot.pauseCount;
+    totalPauseTime += snapshot.totalPauseTime;
+    cumTotalPower += snapshot.cumTotalPower;
     cumEstimatedDistance += snapshot.cumEstimatedDistance;
     if (snapshot.maxSpeed > maxSpeed) maxSpeed = snapshot.maxSpeed;
-    speedSum     += snapshot.speedSum;
+    speedSum += snapshot.speedSum;
     speedSamples += snapshot.speedSamples;
     autoSaveCumulativeStats();
     updateCumulativeStats();
 }
 
 function recoverFromSnapshot(snapshot) {
-    cumDistance          = snapshot.cumDistance;
-    cumCalories          = snapshot.cumCalories;
-    cumTimeSeconds       = snapshot.cumTimeSeconds;
-    pauseCount           = snapshot.pauseCount;
-    totalPauseTime       = snapshot.totalPauseTime;
-    cumTotalPower        = snapshot.cumTotalPower;
+    cumDistance = snapshot.cumDistance;
+    cumCalories = snapshot.cumCalories;
+    cumTimeSeconds = snapshot.cumTimeSeconds;
+    pauseCount = snapshot.pauseCount;
+    totalPauseTime = snapshot.totalPauseTime;
+    cumTotalPower = snapshot.cumTotalPower;
     cumEstimatedDistance = snapshot.cumEstimatedDistance;
-    maxSpeed             = snapshot.maxSpeed;
-    speedSum             = snapshot.speedSum;
-    speedSamples         = snapshot.speedSamples;
+    maxSpeed = snapshot.maxSpeed;
+    speedSum = snapshot.speedSum;
+    speedSamples = snapshot.speedSamples;
     autoSaveCumulativeStats();
     updateCumulativeStats();
 }
 
 function recoverSession() {
-    const backup = JSON.parse(localStorage.getItem("wp_session_backup") || "null");
+    const backup = JSON.parse(
+        localStorage.getItem("wp_session_backup") || "null",
+    );
     if (!backup) return;
     mergeFromSnapshot(backup);
     localStorage.removeItem("wp_session_backup");
@@ -557,11 +943,12 @@ function recoverSession() {
 }
 
 function loadCumulativeStats() {
-    cumDistance    = parseFloat(localStorage.getItem("wp_cumDistance"))    || 0;
-    cumCalories    = parseFloat(localStorage.getItem("wp_cumCalories"))    || 0;
-    cumTimeSeconds = parseInt(localStorage.getItem("wp_cumTimeSeconds"))   || 0;
-    pauseCount     = parseInt(localStorage.getItem("wp_cumPauseCount"))    || 0;
-    totalPauseTime = parseFloat(localStorage.getItem("wp_cumTotalPauseTime")) || 0;
+    cumDistance = parseFloat(localStorage.getItem("wp_cumDistance")) || 0;
+    cumCalories = parseFloat(localStorage.getItem("wp_cumCalories")) || 0;
+    cumTimeSeconds = parseInt(localStorage.getItem("wp_cumTimeSeconds")) || 0;
+    pauseCount = parseInt(localStorage.getItem("wp_cumPauseCount")) || 0;
+    totalPauseTime =
+        parseFloat(localStorage.getItem("wp_cumTotalPauseTime")) || 0;
     isPaused = localStorage.getItem("wp_isPaused") === "1";
     const savedTimestamp = localStorage.getItem("wp_pauseStartTimestamp");
     pauseStartTimestamp = savedTimestamp ? parseInt(savedTimestamp) : null;
@@ -569,45 +956,159 @@ function loadCumulativeStats() {
         totalPauseTime += (Date.now() - pauseStartTimestamp) / 1000;
         pauseStartTimestamp = Date.now();
     }
-    lastHistoryDistance     = parseFloat(localStorage.getItem("wp_lastHistoryDistance"))     || 0;
-    lastHistoryCalories     = parseFloat(localStorage.getItem("wp_lastHistoryCalories"))     || 0;
-    lastHistorySpeedSum     = parseFloat(localStorage.getItem("wp_lastHistorySpeedSum"))     || 0;
-    lastHistorySpeedSamples = parseInt(localStorage.getItem("wp_lastHistorySpeedSamples"))   || 0;
-    lastHistoryTimeSeconds  = parseInt(localStorage.getItem("wp_lastHistoryTimeSeconds"))    || 0;
-    lastHistoryPauseCount   = parseInt(localStorage.getItem("wp_lastHistoryPauseCount"))     || 0;
+    lastHistoryDistance =
+        parseFloat(localStorage.getItem("wp_lastHistoryDistance")) || 0;
+    lastHistoryCalories =
+        parseFloat(localStorage.getItem("wp_lastHistoryCalories")) || 0;
+    lastHistorySpeedSum =
+        parseFloat(localStorage.getItem("wp_lastHistorySpeedSum")) || 0;
+    lastHistorySpeedSamples =
+        parseInt(localStorage.getItem("wp_lastHistorySpeedSamples")) || 0;
+    lastHistoryTimeSeconds =
+        parseInt(localStorage.getItem("wp_lastHistoryTimeSeconds")) || 0;
+    lastHistoryPauseCount =
+        parseInt(localStorage.getItem("wp_lastHistoryPauseCount")) || 0;
+    lastHistorySteps =
+        parseInt(localStorage.getItem("wp_lastHistorySteps")) || 0;
+    cumEstimatedDistance =
+        parseFloat(localStorage.getItem("wp_cumEstimatedDistance")) || 0;
+}
+
+const DEFAULT_SPEED_PRESETS = [3.5, 4.5, 5.5, 6.5, 7.5, 8.5];
+
+function applySpeedPresets(presets) {
+    presets.forEach((speed, i) => {
+        const label = speed % 1 === 0 ? speed.toFixed(1) : speed.toString();
+        const desktop = document.getElementById(`presetBtn${i}`);
+        const mobile = document.getElementById(`presetBtn${i}M`);
+        if (desktop) {
+            desktop.textContent = label;
+            desktop.onclick = () => {
+                haptic(30);
+                startAndSetSpeed(speed);
+            };
+        }
+        if (mobile) {
+            mobile.textContent = label;
+            mobile.onclick = () => {
+                haptic(30);
+                startAndSetSpeed(speed);
+            };
+        }
+    });
 }
 
 function loadDefaults() {
+    const savedPresets =
+        JSON.parse(localStorage.getItem("wp_speed_presets") || "null") ||
+        DEFAULT_SPEED_PRESETS;
+    savedPresets.forEach((v, i) => {
+        const el = document.getElementById(`speedPreset${i}`);
+        if (el) el.value = v;
+    });
+    applySpeedPresets(savedPresets);
     const w = localStorage.getItem("wp_weight");
-    const h = localStorage.getItem("wp_height");
+    const storedCm = localStorage.getItem("wp_height_cm");
     const a = localStorage.getItem("wp_age");
-    if (!w || !h || !a) {
+    if (!w || storedCm == null || !a) {
         showOnboardingModal();
         return;
     }
     userWeight = parseFloat(w);
-    userHeight = h;
-    userAge    = parseInt(a);
+    userHeightCm = parseFloat(storedCm);
+    userHeightUnit = localStorage.getItem("wp_height_unit") || "ftin";
+    userAge = parseInt(a);
     document.getElementById("weightInput").value = userWeight;
-    document.getElementById("heightInput").value = userHeight;
-    document.getElementById("ageInput").value    = userAge;
+    applyHeightToSettingsInputs();
+    document.getElementById("ageInput").value = userAge;
     webhookUrl = localStorage.getItem("wp_webhook_url") || "";
     webhookSecret = localStorage.getItem("wp_webhook_secret") || "";
     document.getElementById("webhookUrlInput").value = webhookUrl;
     document.getElementById("webhookSecretInput").value = webhookSecret;
 }
 
+function setPillActive(activeId, inactiveId) {
+    for (const [id, isActive] of [[activeId, true], [inactiveId, false]]) {
+        const el = document.getElementById(id);
+        if (!el) continue;
+        el.classList.toggle("bg-sporty", isActive);
+        el.classList.toggle("text-white", isActive);
+        el.classList.toggle("bg-gray-100", !isActive);
+        el.classList.toggle("dark:bg-gray-800", !isActive);
+        el.classList.toggle("text-gray-500", !isActive);
+        el.classList.toggle("dark:text-gray-400", !isActive);
+    }
+}
+
+function applyHeightToSettingsInputs() {
+    const isFtIn = userHeightUnit === "ftin";
+    const ftInDiv = document.getElementById("heightFtInInputs");
+    const cmDiv = document.getElementById("heightCmInputs");
+    if (ftInDiv) {
+        ftInDiv.classList.toggle("hidden", !isFtIn);
+        ftInDiv.classList.toggle("flex", isFtIn);
+    }
+    if (cmDiv) {
+        cmDiv.classList.toggle("hidden", isFtIn);
+        cmDiv.classList.toggle("flex", !isFtIn);
+    }
+    setPillActive(isFtIn ? "heightUnitFtIn" : "heightUnitCm",
+                  isFtIn ? "heightUnitCm"   : "heightUnitFtIn");
+    if (isFtIn) {
+        const { ft, inches } = cmToFtIn(userHeightCm);
+        const ftEl = document.getElementById("heightFtInput");
+        const inEl = document.getElementById("heightInInput");
+        if (ftEl) ftEl.value = ft;
+        if (inEl) inEl.value = inches;
+    } else {
+        const cmEl = document.getElementById("heightCmInput");
+        if (cmEl) cmEl.value = Math.round(userHeightCm);
+    }
+}
+
+function applyHeightToOnboardingInputs() {
+    const isFtIn = userHeightUnit === "ftin";
+    const ftInDiv = document.getElementById("onboardingHeightFtInInputs");
+    const cmDiv = document.getElementById("onboardingHeightCmInputs");
+    if (ftInDiv) {
+        ftInDiv.classList.toggle("hidden", !isFtIn);
+        ftInDiv.classList.toggle("flex", isFtIn);
+    }
+    if (cmDiv) {
+        cmDiv.classList.toggle("hidden", isFtIn);
+        cmDiv.classList.toggle("flex", !isFtIn);
+    }
+    setPillActive(isFtIn ? "onboardingHeightUnitFtIn" : "onboardingHeightUnitCm",
+                  isFtIn ? "onboardingHeightUnitCm"   : "onboardingHeightUnitFtIn");
+}
+
 function saveDefaults() {
-    userWeight = parseFloat(document.getElementById("weightInput").value) || userWeight;
-    userHeight = document.getElementById("heightInput").value            || userHeight;
-    userAge    = parseInt(document.getElementById("ageInput").value)     || userAge;
+    userWeight =
+        parseFloat(document.getElementById("weightInput").value) || userWeight;
+    if (userHeightUnit === "ftin") {
+        const ft = parseInt(document.getElementById("heightFtInput").value, 10);
+        const inches = parseInt(document.getElementById("heightInInput").value, 10);
+        if (!isNaN(ft) && !isNaN(inches)) userHeightCm = ftInToCm(ft, inches);
+    } else {
+        const cm = parseFloat(document.getElementById("heightCmInput").value);
+        if (!isNaN(cm) && cm > 0) userHeightCm = cm;
+    }
+    userAge = parseInt(document.getElementById("ageInput").value) || userAge;
     localStorage.setItem("wp_weight", userWeight);
-    localStorage.setItem("wp_height", userHeight);
-    localStorage.setItem("wp_age",    userAge);
+    localStorage.setItem("wp_height_cm", userHeightCm);
+    localStorage.setItem("wp_height_unit", userHeightUnit);
+    localStorage.setItem("wp_age", userAge);
     webhookUrl = document.getElementById("webhookUrlInput").value.trim();
     webhookSecret = document.getElementById("webhookSecretInput").value.trim();
     localStorage.setItem("wp_webhook_url", webhookUrl);
     localStorage.setItem("wp_webhook_secret", webhookSecret);
+    const presets = DEFAULT_SPEED_PRESETS.map((def, i) => {
+        const el = document.getElementById(`speedPreset${i}`);
+        const v = el ? parseFloat(el.value) : def;
+        return Math.min(12, Math.max(1, isNaN(v) ? def : v));
+    });
+    localStorage.setItem("wp_speed_presets", JSON.stringify(presets));
+    applySpeedPresets(presets);
 }
 
 // ============================================================
@@ -616,9 +1117,16 @@ function saveDefaults() {
 
 function saveExportSnapshot() {
     const snapshot = {
-        cumDistance, cumCalories, cumTimeSeconds,
-        pauseCount, totalPauseTime, cumTotalPower,
-        maxSpeed, speedSum, speedSamples, cumEstimatedDistance,
+        cumDistance,
+        cumCalories,
+        cumTimeSeconds,
+        pauseCount,
+        totalPauseTime,
+        cumTotalPower,
+        maxSpeed,
+        speedSum,
+        speedSamples,
+        cumEstimatedDistance,
         savedAt: new Date().toLocaleString(),
     };
     localStorage.setItem("wp_export_snapshot", JSON.stringify(snapshot));
@@ -626,7 +1134,9 @@ function saveExportSnapshot() {
 }
 
 function updateExportRecoverBtn() {
-    const snapshot = JSON.parse(localStorage.getItem("wp_export_snapshot") || "null");
+    const snapshot = JSON.parse(
+        localStorage.getItem("wp_export_snapshot") || "null",
+    );
     const btn = document.getElementById("recoverExportBtn");
     if (snapshot && snapshot.cumDistance > 0) {
         btn.title = `Restore to last export: ${snapshot.savedAt} (${snapshot.cumDistance.toFixed(2)} km)`;
@@ -640,7 +1150,9 @@ function updateExportRecoverBtn() {
 }
 
 function recoverFromExport() {
-    const snapshot = JSON.parse(localStorage.getItem("wp_export_snapshot") || "null");
+    const snapshot = JSON.parse(
+        localStorage.getItem("wp_export_snapshot") || "null",
+    );
     if (!snapshot) return;
     recoverFromSnapshot(snapshot);
 }
@@ -655,20 +1167,64 @@ function triggerDownload(blob) {
 async function exportStats() {
     saveSessionToHistory();
     saveExportSnapshot();
-    const avgSpeed = speedSamples > 0 ? (speedSum / speedSamples).toFixed(2) : "0.00";
-    const avgPause = pauseCount > 0 ? (totalPauseTime / pauseCount).toFixed(0) : "0";
+    const avgSpeed =
+        speedSamples > 0 ? (speedSum / speedSamples).toFixed(2) : "0.00";
+    const avgPause =
+        pauseCount > 0 ? (totalPauseTime / pauseCount).toFixed(0) : "0";
     const rows = [
-        ["Type", "Speed", "Max Speed", "Avg Speed", "Distance", "Calories", "Time", "Pauses", "Total Pause Time (s)", "Avg Pause Time (s)"],
-        ["Current",    currentSpeed, maxSpeed, avgSpeed, currentDistance, Math.round(currentCalories), new Date(currentTimeSeconds * 1000).toISOString().slice(11, 19), pauseCount, totalPauseTime.toFixed(0), avgPause],
-        ["Cumulative", currentSpeed, maxSpeed, avgSpeed, cumDistance,     Math.round(cumCalories),     new Date(cumTimeSeconds * 1000).toISOString().slice(11, 19),     pauseCount, totalPauseTime.toFixed(0), avgPause],
+        [
+            "Type",
+            "Speed",
+            "Max Speed",
+            "Avg Speed",
+            "Distance",
+            "Calories",
+            "Time",
+            "Pauses",
+            "Total Pause Time (s)",
+            "Avg Pause Time (s)",
+        ],
+        [
+            "Current",
+            currentSpeed,
+            maxSpeed,
+            avgSpeed,
+            cumDistance,
+            Math.round(cumCalories),
+            new Date(cumTimeSeconds * 1000).toISOString().slice(11, 19),
+            pauseCount,
+            totalPauseTime.toFixed(0),
+            avgPause,
+        ],
+        [
+            "Cumulative",
+            currentSpeed,
+            maxSpeed,
+            avgSpeed,
+            cumDistance,
+            Math.round(cumCalories),
+            new Date(cumTimeSeconds * 1000).toISOString().slice(11, 19),
+            pauseCount,
+            totalPauseTime.toFixed(0),
+            avgPause,
+        ],
     ];
-    const csv  = rows.map(r => r.join(",")).join("\n");
+    const csv = rows.map((r) => r.join(",")).join("\n");
     const blob = new Blob([csv], { type: "text/csv" });
-    const file = new File([blob], "walking_pad_stats.csv", { type: "text/csv" });
+    const file = new File([blob], "walking_pad_stats.csv", {
+        type: "text/csv",
+    });
     if (!webhookUrl) {
-        if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+        if (
+            navigator.share &&
+            navigator.canShare &&
+            navigator.canShare({ files: [file] })
+        ) {
             try {
-                await navigator.share({ title: "Walking Pad Stats", files: [file] });
+                await navigator.share({
+                    title: "Walking Pad Stats",
+                    files: [file],
+                });
             } catch (e) {
                 if (e.name !== "AbortError") triggerDownload(blob);
             }
@@ -682,13 +1238,16 @@ async function exportStats() {
             secret: webhookSecret,
             exportedAt: new Date().toISOString(),
             session: {
-                distance: currentDistance,
-                calories: Math.round(currentCalories),
-                timeSeconds: currentTimeSeconds,
+                distance: cumDistance,
+                calories: Math.round(cumCalories),
+                timeSeconds: cumTimeSeconds,
                 maxSpeed,
                 avgSpeed: speedSamples > 0 ? speedSum / speedSamples : 0,
-                pace: (speedSamples > 0 && (speedSum / speedSamples) > 0) ? 60 / (speedSum / speedSamples) : 0,
-                steps: currentSteps,
+                pace:
+                    speedSamples > 0 && speedSum / speedSamples > 0
+                        ? 60 / (speedSum / speedSamples)
+                        : 0,
+                steps: cumSteps,
                 pauseCount,
             },
             cumulative: {
@@ -697,18 +1256,22 @@ async function exportStats() {
                 timeSeconds: cumTimeSeconds,
                 maxSpeed,
                 avgSpeed: speedSamples > 0 ? speedSum / speedSamples : 0,
-                pace: (speedSamples > 0 && (speedSum / speedSamples) > 0) ? 60 / (speedSum / speedSamples) : 0,
+                pace:
+                    speedSamples > 0 && speedSum / speedSamples > 0
+                        ? 60 / (speedSum / speedSamples)
+                        : 0,
                 steps: cumSteps,
                 pauseCount,
                 pauseTimeSeconds: totalPauseTime,
             },
-            history: JSON.parse(localStorage.getItem("wp_history") || "{}"),
+            sessions: loadSessions(),
         };
         fetch(webhookUrl, {
             method: "POST",
+            mode: "no-cors",
             headers: { "Content-Type": "text/plain" },
             body: JSON.stringify(payload),
-        }).catch(e => console.warn("Webhook failed:", e));
+        }).catch((e) => console.warn("Webhook failed:", e));
     }
     renderCharts();
     renderSessionHistory();
@@ -716,43 +1279,70 @@ async function exportStats() {
 }
 
 async function copyForSheets() {
-    const history = JSON.parse(localStorage.getItem("wp_history") || "{}");
-    const dates = Object.keys(history).sort();
+    const sessions = loadSessions()
+        .slice()
+        .sort((a, b) => a.savedAt.localeCompare(b.savedAt));
+    const fmtTime = (sec) => new Date(sec * 1000).toISOString().slice(11, 19);
+    const fmtPace = (avg) => {
+        if (avg <= 0) return "—";
+        const p = 60 / avg;
+        return `${Math.floor(p)}:${String(Math.round((p % 1) * 60)).padStart(2, "0")}`;
+    };
     const header = [
-        "Date", "Week", "Month", "Year", "Session End",
-        "Distance (km)", "Calories (kcal)", "Duration (min)",
-        "Avg Speed (km/h)", "Max Speed (km/h)", "Pace (min/km)",
-        "Steps", "Pauses"
+        "Date",
+        "Week",
+        "Month",
+        "Year",
+        "Session Start",
+        "Duration",
+        "Distance (km)",
+        "Calories (kcal)",
+        "Avg Speed (km/h)",
+        "Max Speed (km/h)",
+        "Pace (min/km)",
+        "Steps",
+        "Pauses",
     ];
-    const rows = dates.map(date => {
-        const d = history[date];
-        const dt = new Date(date);
-        const week = Math.ceil((((dt - new Date(dt.getFullYear(), 0, 1)) / 86400000) + 1) / 7);
-        const month = dt.toLocaleDateString("en-US", { month: "short", year: "numeric" });
+    const rows = sessions.map((s) => {
+        const dt = new Date(s.date);
+        const week = Math.ceil(
+            ((dt - new Date(dt.getFullYear(), 0, 1)) / 86400000 + 1) / 7,
+        );
+        const month = dt.toLocaleDateString("en-US", {
+            month: "short",
+            year: "numeric",
+        });
         const year = dt.getFullYear();
-        const sessionEnd = d.lastUpdated ? new Date(d.lastUpdated).toLocaleString() : "—";
-        const avg = d.speedSamples > 0 ? d.speedSum / d.speedSamples : 0;
-        const pace = avg > 0 ? parseFloat((60 / avg).toFixed(2)) : 0;
-        const durationMin = parseFloat(((d.timeSeconds || 0) / 60).toFixed(1));
+        const sessionStart = s.sessionStart
+            ? new Date(s.sessionStart).toLocaleString()
+            : "—";
+        const avg = s.speedSamples > 0 ? s.speedSum / s.speedSamples : 0;
         return [
-            date, week, month, year, sessionEnd,
-            parseFloat(d.distance.toFixed(2)),
-            Math.round(d.calories),
-            durationMin,
+            s.date,
+            week,
+            month,
+            year,
+            sessionStart,
+            fmtTime(s.timeSeconds || 0),
+            parseFloat((s.distance || 0).toFixed(2)),
+            Math.round(s.calories || 0),
             parseFloat(avg.toFixed(2)),
-            parseFloat((d.maxSpeed || 0).toFixed(1)),
-            pace,
-            0,
-            d.pauses || 0,
+            parseFloat((s.maxSpeed || 0).toFixed(1)),
+            fmtPace(avg),
+            s.steps || 0,
+            s.pauses || 0,
         ];
     });
-    const tsv = [header, ...rows].map(r => r.join("\t")).join("\n");
+    const tsv = [header, ...rows].map((r) => r.join("\t")).join("\n");
     try {
         await navigator.clipboard.writeText(tsv);
         const btn = document.getElementById("copyForSheetsBtn");
         const orig = btn.innerHTML;
-        btn.innerHTML = '<i class="fas fa-check"></i><span class="hidden sm:inline"> Copied!</span>';
-        setTimeout(() => { btn.innerHTML = orig; }, 2000);
+        btn.innerHTML =
+            '<i class="fas fa-check"></i><span class="hidden sm:inline"> Copied!</span>';
+        setTimeout(() => {
+            btn.innerHTML = orig;
+        }, 2000);
     } catch (e) {
         console.warn("Clipboard write failed:", e);
     }
@@ -763,44 +1353,51 @@ async function copyForSheets() {
 // ============================================================
 
 function saveSessionToHistory() {
-    const deltaDistance     = cumDistance    - lastHistoryDistance;
-    const deltaCalories     = cumCalories    - lastHistoryCalories;
-    const deltaSpeedSum     = speedSum       - lastHistorySpeedSum;
-    const deltaSpeedSamples = speedSamples   - lastHistorySpeedSamples;
-    const deltaTimeSeconds  = cumTimeSeconds - lastHistoryTimeSeconds;
-    const deltaPauses       = Math.max(0, pauseCount - lastHistoryPauseCount);
+    const deltaDistance = cumDistance - lastHistoryDistance;
+    const deltaCalories = cumCalories - lastHistoryCalories;
+    const deltaSpeedSum = speedSum - lastHistorySpeedSum;
+    const deltaSpeedSamples = speedSamples - lastHistorySpeedSamples;
+    const deltaTimeSeconds = cumTimeSeconds - lastHistoryTimeSeconds;
+    const deltaPauses = Math.max(0, pauseCount - lastHistoryPauseCount);
+    const deltaSteps = Math.max(0, cumSteps - lastHistorySteps);
     if (deltaDistance <= 0 && deltaSpeedSamples <= 0) return;
-    const today = new Date().toISOString().slice(0, 10);
-    let history = JSON.parse(localStorage.getItem("wp_history") || "{}");
-    if (!history[today]) {
-        history[today] = { distance: 0, calories: 0, speedSum: 0, speedSamples: 0, timeSeconds: 0, sessions: 0, pauses: 0, maxSpeed: 0 };
-    }
-    history[today].distance     += deltaDistance;
-    history[today].calories     += deltaCalories;
-    history[today].speedSum     += deltaSpeedSum;
-    history[today].speedSamples += deltaSpeedSamples;
-    history[today].timeSeconds   = (history[today].timeSeconds || 0) + Math.max(0, deltaTimeSeconds);
-    history[today].sessions      = (history[today].sessions || 0) + 1;
-    history[today].pauses        = (history[today].pauses   || 0) + deltaPauses;
-    history[today].maxSpeed      = Math.max(history[today].maxSpeed || 0, maxSpeed);
-    history[today].lastUpdated   = new Date().toISOString();
-    localStorage.setItem("wp_history", JSON.stringify(history));
-    lastHistoryDistance     = cumDistance;
-    lastHistoryCalories     = cumCalories;
-    lastHistorySpeedSum     = speedSum;
+    const sessions = loadSessions();
+    sessions.push({
+        date: new Date().toISOString().slice(0, 10),
+        savedAt: new Date().toISOString(),
+        sessionStart: sessionStartTime || new Date().toISOString(),
+        distance: deltaDistance,
+        calories: deltaCalories,
+        timeSeconds: Math.max(0, deltaTimeSeconds),
+        speedSum: deltaSpeedSum,
+        speedSamples: deltaSpeedSamples,
+        maxSpeed: maxSpeed,
+        pauses: deltaPauses,
+        steps: deltaSteps,
+    });
+    localStorage.setItem("wp_sessions", JSON.stringify(sessions));
+    lastHistoryDistance = cumDistance;
+    lastHistoryCalories = cumCalories;
+    lastHistorySpeedSum = speedSum;
     lastHistorySpeedSamples = speedSamples;
-    lastHistoryTimeSeconds  = cumTimeSeconds;
-    lastHistoryPauseCount   = pauseCount;
+    lastHistoryTimeSeconds = cumTimeSeconds;
+    lastHistoryPauseCount = pauseCount;
+    lastHistorySteps = cumSteps;
 }
 
 function getChartData() {
-    let history  = JSON.parse(localStorage.getItem("wp_history") || "{}");
-    let dates    = Object.keys(history).sort();
-    let distanceData = [], caloriesData = [], speedData = [];
-    dates.forEach(date => {
+    let history = loadHistory();
+    let dates = Object.keys(history).sort();
+    let distanceData = [],
+        caloriesData = [],
+        speedData = [];
+    dates.forEach((date) => {
         distanceData.push(parseFloat(history[date].distance.toFixed(2)));
         caloriesData.push(parseFloat(history[date].calories.toFixed(1)));
-        const avgSpeed = history[date].speedSamples > 0 ? history[date].speedSum / history[date].speedSamples : 0;
+        const avgSpeed =
+            history[date].speedSamples > 0
+                ? history[date].speedSum / history[date].speedSamples
+                : 0;
         speedData.push(parseFloat(avgSpeed.toFixed(2)));
     });
     return { dates, distanceData, caloriesData, speedData };
@@ -808,88 +1405,303 @@ function getChartData() {
 
 function renderCharts() {
     const { dates, distanceData, caloriesData, speedData } = getChartData();
-    const isDark     = document.documentElement.classList.contains("dark");
-    const tickColor  = isDark ? "#e5e7eb" : "#374151";
-    const gridColor  = isDark ? "rgba(255,255,255,0.1)" : "rgba(0,0,0,0.1)";
-    const chartOpts  = (label, color) => ({
+    const isDark = document.documentElement.classList.contains("dark");
+    const tickColor = isDark ? "#e5e7eb" : "#374151";
+    const gridColor = isDark ? "rgba(255,255,255,0.1)" : "rgba(0,0,0,0.1)";
+    const chartOpts = (label, color) => ({
         type: "line",
         data: {
             labels: dates,
-            datasets: [{
-                label,
-                data: dates.length === 0 ? [] : (label.includes("Distance") ? distanceData : label.includes("Calor") ? caloriesData : speedData),
-                borderColor: color,
-                backgroundColor: color.replace(")", ",0.2)").replace("rgb", "rgba"),
-                fill: true,
-                tension: 0.3,
-                pointRadius: 3,
-            }]
+            datasets: [
+                {
+                    label,
+                    data:
+                        dates.length === 0
+                            ? []
+                            : label.includes("Distance")
+                              ? distanceData
+                              : label.includes("Calor")
+                                ? caloriesData
+                                : speedData,
+                    borderColor: color,
+                    backgroundColor: color
+                        .replace(")", ",0.2)")
+                        .replace("rgb", "rgba"),
+                    fill: true,
+                    tension: 0.3,
+                    pointRadius: 3,
+                },
+            ],
         },
         options: {
             responsive: true,
             plugins: { legend: { labels: { color: tickColor } } },
             scales: {
                 x: { ticks: { color: tickColor }, grid: { color: gridColor } },
-                y: { ticks: { color: tickColor }, grid: { color: gridColor } }
-            }
-        }
+                y: { ticks: { color: tickColor }, grid: { color: gridColor } },
+            },
+        },
     });
 
     if (wpCharts.distance) wpCharts.distance.destroy();
     if (wpCharts.calories) wpCharts.calories.destroy();
     if (wpCharts.speedHist) wpCharts.speedHist.destroy();
 
-    wpCharts.distance = new Chart(document.getElementById("distanceChart").getContext("2d"), chartOpts("Distance (km)", "#0ea5e9"));
+    wpCharts.distance = new Chart(
+        document.getElementById("distanceChart").getContext("2d"),
+        chartOpts("Distance (km)", "#0ea5e9"),
+    );
     const calOpts = chartOpts("Calories (kcal)", "#f59e42");
     calOpts.data.datasets[0].data = caloriesData;
-    wpCharts.calories = new Chart(document.getElementById("caloriesChart").getContext("2d"), calOpts);
+    wpCharts.calories = new Chart(
+        document.getElementById("caloriesChart").getContext("2d"),
+        calOpts,
+    );
     const spdOpts = chartOpts("Avg Speed (km/h)", "#38bdf8");
     spdOpts.data.datasets[0].data = speedData;
-    wpCharts.speedHist = new Chart(document.getElementById("speedChart").getContext("2d"), spdOpts);
+    wpCharts.speedHist = new Chart(
+        document.getElementById("speedChart").getContext("2d"),
+        spdOpts,
+    );
 }
 
 function renderSessionHistory() {
-    let history = JSON.parse(localStorage.getItem("wp_history") || "{}");
-    let dates   = Object.keys(history).sort().reverse();
+    if (historyView === "day") {
+        renderHistoryByDay();
+    } else {
+        renderHistoryBySessions();
+    }
+}
+
+function renderHistoryByDay() {
+    const history = loadHistory();
+    const dates = Object.keys(history).sort().reverse();
+    const thead = document.getElementById("historyTableHead");
     const tbody = document.getElementById("historyTableBody");
+
+    // Update header for day view
+    thead.innerHTML = "";
+    const trHead = document.createElement("tr");
+    trHead.className =
+        "text-left border-b border-gray-200 dark:border-gray-700";
+    [
+        "Date",
+        "km",
+        "kcal",
+        "Time",
+        "Avg km/h",
+        "Steps",
+        "Sessions",
+        "Pauses",
+    ].forEach((label, i) => {
+        const th = document.createElement("th");
+        th.className =
+            "pb-2 font-semibold" + (i >= 5 ? " hidden md:table-cell" : "");
+        th.textContent = label;
+        trHead.appendChild(th);
+    });
+    thead.appendChild(trHead);
+
     if (dates.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="8" class="py-4 text-center text-gray-400">No history yet</td></tr>';
+        tbody.innerHTML =
+            '<tr><td colspan="8" class="py-4 text-center text-gray-400">No history yet</td></tr>';
         return;
     }
     // Build set of streak dates for fire indicators
     const streakDates = new Set();
     const todayKey = new Date().toISOString().slice(0, 10);
-    const todayActive = (history[todayKey] && (history[todayKey].distance || 0) > 0) || cumDistance > 0;
+    const todayActive =
+        (history[todayKey] && (history[todayKey].distance || 0) > 0) ||
+        cumDistance > 0;
     const sd = new Date();
     if (!todayActive) sd.setDate(sd.getDate() - 1);
     for (let i = 0; i < 365; i++) {
         const key = sd.toISOString().slice(0, 10);
-        const active = key === todayKey ? todayActive : (history[key] && (history[key].distance || 0) > 0);
-        if (active) { streakDates.add(key); sd.setDate(sd.getDate() - 1); }
-        else break;
+        const active =
+            key === todayKey
+                ? todayActive
+                : history[key] && (history[key].distance || 0) > 0;
+        if (active) {
+            streakDates.add(key);
+            sd.setDate(sd.getDate() - 1);
+        } else break;
     }
-    tbody.innerHTML = dates.map(date => {
-        const d        = history[date];
-        const avgSpeed = d.speedSamples > 0 ? (d.speedSum / d.speedSamples).toFixed(2) : "0.00";
-        const steps    = (d.steps || 0).toLocaleString();
-        const timeStr  = d.timeSeconds > 0
-            ? new Date(d.timeSeconds * 1000).toISOString().slice(11, 19)
+    const fragment = document.createDocumentFragment();
+    dates.forEach((date) => {
+        const d = history[date];
+        const avgSpeed =
+            d.speedSamples > 0
+                ? (d.speedSum / d.speedSamples).toFixed(2)
+                : "0.00";
+        const steps = (d.steps || 0).toLocaleString();
+        const timeStr =
+            d.timeSeconds > 0
+                ? new Date(d.timeSeconds * 1000).toISOString().slice(11, 19)
+                : "—";
+
+        const tr = document.createElement("tr");
+        tr.className =
+            "border-b border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800";
+
+        const tdDate = document.createElement("td");
+        tdDate.className = "py-2 text-gray-600 dark:text-gray-300";
+        if (streakDates.has(date)) {
+            const icon = document.createElement("i");
+            icon.className = "fas fa-fire text-orange-400 text-xs mr-1";
+            tdDate.appendChild(icon);
+        }
+        tdDate.appendChild(document.createTextNode(date));
+
+        const tdDist = document.createElement("td");
+        tdDist.className = "py-2 font-semibold text-sporty";
+        tdDist.textContent = d.distance.toFixed(2);
+
+        const tdCal = document.createElement("td");
+        tdCal.className = "py-2 font-semibold text-accent";
+        tdCal.textContent = Math.round(d.calories);
+
+        const tdTime = document.createElement("td");
+        tdTime.className = "py-2 font-semibold text-yellow-400";
+        tdTime.textContent = timeStr;
+
+        const tdSpeed = document.createElement("td");
+        tdSpeed.className = "py-2 font-semibold text-blue-400";
+        tdSpeed.textContent = avgSpeed;
+
+        const tdSteps = document.createElement("td");
+        tdSteps.className =
+            "py-2 font-semibold text-sporty hidden md:table-cell";
+        tdSteps.textContent = steps;
+
+        const tdSessions = document.createElement("td");
+        tdSessions.className =
+            "py-2 font-semibold text-green-400 hidden md:table-cell";
+        tdSessions.textContent = d.sessions || 0;
+
+        const tdPauses = document.createElement("td");
+        tdPauses.className =
+            "py-2 font-semibold text-purple-400 hidden md:table-cell";
+        tdPauses.textContent = d.pauses || 0;
+
+        tr.append(
+            tdDate,
+            tdDist,
+            tdCal,
+            tdTime,
+            tdSpeed,
+            tdSteps,
+            tdSessions,
+            tdPauses,
+        );
+        fragment.appendChild(tr);
+    });
+    tbody.innerHTML = "";
+    tbody.appendChild(fragment);
+}
+
+function renderHistoryBySessions() {
+    const sessions = loadSessions().slice().reverse(); // newest first
+    const thead = document.getElementById("historyTableHead");
+    const tbody = document.getElementById("historyTableBody");
+
+    // Update header for session view
+    thead.innerHTML = "";
+    const trHead = document.createElement("tr");
+    trHead.className =
+        "text-left border-b border-gray-200 dark:border-gray-700";
+    [
+        "Start",
+        "Date",
+        "km",
+        "kcal",
+        "Duration",
+        "Avg km/h",
+        "Steps",
+        "Pauses",
+    ].forEach((label, i) => {
+        const th = document.createElement("th");
+        th.className =
+            "pb-2 font-semibold" + (i >= 6 ? " hidden md:table-cell" : "");
+        th.textContent = label;
+        trHead.appendChild(th);
+    });
+    thead.appendChild(trHead);
+
+    if (sessions.length === 0) {
+        tbody.innerHTML =
+            '<tr><td colspan="8" class="py-4 text-center text-gray-400">No history yet</td></tr>';
+        return;
+    }
+    const fragment = document.createDocumentFragment();
+    sessions.forEach((s) => {
+        const avgSpeed =
+            s.speedSamples > 0
+                ? (s.speedSum / s.speedSamples).toFixed(2)
+                : "0.00";
+        const steps = (s.steps || 0).toLocaleString();
+        const timeStr =
+            s.timeSeconds > 0
+                ? new Date(s.timeSeconds * 1000).toISOString().slice(11, 19)
+                : "—";
+        const startTime = s.sessionStart
+            ? new Date(s.sessionStart).toLocaleTimeString([], {
+                  hour: "2-digit",
+                  minute: "2-digit",
+              })
             : "—";
-        const sessions = d.sessions || 0;
-        const pauses   = d.pauses   || 0;
-        const fire     = streakDates.has(date)
-            ? '<i class="fas fa-fire text-orange-400 text-xs mr-1"></i>' : '';
-        return `<tr class="border-b border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800">
-            <td class="py-2 text-gray-600 dark:text-gray-300">${fire}${date}</td>
-            <td class="py-2 font-semibold text-sporty">${d.distance.toFixed(2)}</td>
-            <td class="py-2 font-semibold text-accent">${Math.round(d.calories)}</td>
-            <td class="py-2 font-semibold text-yellow-400">${timeStr}</td>
-            <td class="py-2 font-semibold text-blue-400">${avgSpeed}</td>
-            <td class="py-2 font-semibold text-sporty hidden md:table-cell">${steps}</td>
-            <td class="py-2 font-semibold text-green-400 hidden md:table-cell">${sessions}</td>
-            <td class="py-2 font-semibold text-purple-400 hidden md:table-cell">${pauses}</td>
-        </tr>`;
-    }).join("");
+
+        const tr = document.createElement("tr");
+        tr.className =
+            "border-b border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800";
+
+        const tdStart = document.createElement("td");
+        tdStart.className = "py-2 text-gray-600 dark:text-gray-300";
+        tdStart.textContent = startTime;
+
+        const tdDate = document.createElement("td");
+        tdDate.className = "py-2 text-gray-500 dark:text-gray-400";
+        tdDate.textContent = s.date;
+
+        const tdDist = document.createElement("td");
+        tdDist.className = "py-2 font-semibold text-sporty";
+        tdDist.textContent = (s.distance || 0).toFixed(2);
+
+        const tdCal = document.createElement("td");
+        tdCal.className = "py-2 font-semibold text-accent";
+        tdCal.textContent = Math.round(s.calories || 0);
+
+        const tdTime = document.createElement("td");
+        tdTime.className = "py-2 font-semibold text-yellow-400";
+        tdTime.textContent = timeStr;
+
+        const tdSpeed = document.createElement("td");
+        tdSpeed.className = "py-2 font-semibold text-blue-400";
+        tdSpeed.textContent = avgSpeed;
+
+        const tdSteps = document.createElement("td");
+        tdSteps.className =
+            "py-2 font-semibold text-sporty hidden md:table-cell";
+        tdSteps.textContent = steps;
+
+        const tdPauses = document.createElement("td");
+        tdPauses.className =
+            "py-2 font-semibold text-purple-400 hidden md:table-cell";
+        tdPauses.textContent = s.pauses || 0;
+
+        tr.append(
+            tdStart,
+            tdDate,
+            tdDist,
+            tdCal,
+            tdTime,
+            tdSpeed,
+            tdSteps,
+            tdPauses,
+        );
+        fragment.appendChild(tr);
+    });
+    tbody.innerHTML = "";
+    tbody.appendChild(fragment);
 }
 
 // ============================================================
@@ -897,33 +1709,46 @@ function renderSessionHistory() {
 // ============================================================
 
 function initLiveSpeedChart() {
-    const isDark    = document.documentElement.classList.contains("dark");
+    const isDark = document.documentElement.classList.contains("dark");
     const tickColor = isDark ? "#e5e7eb" : "#374151";
     const gridColor = isDark ? "rgba(255,255,255,0.1)" : "rgba(0,0,0,0.1)";
-    wpCharts.liveSpeed = new Chart(document.getElementById("liveSpeedChart").getContext("2d"), {
-        type: "line",
-        data: {
-            labels: liveSpeedLabels,
-            datasets: [{
-                label: "Speed (km/h)",
-                data: liveSpeedData,
-                borderColor: "#0ea5e9",
-                backgroundColor: "rgba(14,165,233,0.15)",
-                fill: true,
-                tension: 0.3,
-                pointRadius: 2,
-            }]
+    wpCharts.liveSpeed = new Chart(
+        document.getElementById("liveSpeedChart").getContext("2d"),
+        {
+            type: "line",
+            data: {
+                labels: liveSpeedLabels,
+                datasets: [
+                    {
+                        label: "Speed (km/h)",
+                        data: liveSpeedData,
+                        borderColor: "#0ea5e9",
+                        backgroundColor: "rgba(14,165,233,0.15)",
+                        fill: true,
+                        tension: 0.3,
+                        pointRadius: 2,
+                    },
+                ],
+            },
+            options: {
+                animation: false,
+                responsive: true,
+                plugins: { legend: { labels: { color: tickColor } } },
+                scales: {
+                    x: {
+                        ticks: { color: tickColor, maxTicksLimit: 10 },
+                        grid: { color: gridColor },
+                    },
+                    y: {
+                        min: 0,
+                        ...(liveChartYMax > 0 ? { max: liveChartYMax } : {}),
+                        ticks: { color: tickColor },
+                        grid: { color: gridColor },
+                    },
+                },
+            },
         },
-        options: {
-            animation: false,
-            responsive: true,
-            plugins: { legend: { labels: { color: tickColor } } },
-            scales: {
-                x: { ticks: { color: tickColor, maxTicksLimit: 10 }, grid: { color: gridColor } },
-                y: { min: 0, ...(liveChartYMax > 0 ? { max: liveChartYMax } : {}), ticks: { color: tickColor }, grid: { color: gridColor } }
-            }
-        }
-    });
+    );
 }
 
 function updateLiveSpeedChart() {
@@ -946,70 +1771,299 @@ function updateLiveSpeedChart() {
 // ============================================================
 
 function loadGoals() {
-    goalDistanceKm      = parseFloat(localStorage.getItem("wp_goal_distance"))            || 0;
-    goalTimeSeconds     = parseInt(localStorage.getItem("wp_goal_time_seconds"))           || 0;
-    goalWeekDistanceKm  = parseFloat(localStorage.getItem("wp_goal_week_distance"))        || 0;
-    goalWeekTimeSeconds = parseInt(localStorage.getItem("wp_goal_week_time_seconds"))      || 0;
-    goalMonthDistanceKm = parseFloat(localStorage.getItem("wp_goal_month_distance"))       || 0;
-    goalMonthTimeSeconds = parseInt(localStorage.getItem("wp_goal_month_time_seconds"))    || 0;
-    goalThreeMonthDistanceKm  = parseFloat(localStorage.getItem("wp_goal_threemonth_distance"))       || 0;
-    goalThreeMonthTimeSeconds = parseInt(localStorage.getItem("wp_goal_threemonth_time_seconds"))     || 0;
-    goalSixMonthDistanceKm    = parseFloat(localStorage.getItem("wp_goal_sixmonth_distance"))         || 0;
-    goalSixMonthTimeSeconds   = parseInt(localStorage.getItem("wp_goal_sixmonth_time_seconds"))       || 0;
-    goalYearDistanceKm        = parseFloat(localStorage.getItem("wp_goal_year_distance"))             || 0;
-    goalYearTimeSeconds       = parseInt(localStorage.getItem("wp_goal_year_time_seconds"))           || 0;
-    // Populate sliders and displays
-    const distSlider = document.getElementById("goalDistanceSlider");
-    distSlider.value = goalDistanceKm;
-    document.getElementById("goalDistanceDisplay").textContent = goalDistanceKm > 0 ? goalDistanceKm.toFixed(1) : "—";
+    const hasExistingGoals = localStorage.getItem("wp_goal_distance") !== null;
+    const defaultAuto = !hasExistingGoals;
 
-    const timeSlider = document.getElementById("goalTimeSlider");
+    // Active days & sessions
+    goalActiveDays = parseInt(localStorage.getItem("wp_goal_active_days") ?? 5);
+    goalDaySessions = parseInt(
+        localStorage.getItem("wp_goal_day_sessions") ?? 1,
+    );
+    goalWeekSessions = parseInt(
+        localStorage.getItem("wp_goal_week_sessions") ?? goalActiveDays,
+    );
+    goalMonthSessions = parseInt(
+        localStorage.getItem("wp_goal_month_sessions") ?? 0,
+    );
+
+    // Daily goals — default 5km / 30min on first launch
+    goalDistanceKm = parseFloat(localStorage.getItem("wp_goal_distance") ?? 5);
+    goalTimeSeconds = parseInt(
+        localStorage.getItem("wp_goal_time_seconds") ?? 1800,
+    );
+
+    // Period goals
+    goalWeekDistanceKm =
+        parseFloat(localStorage.getItem("wp_goal_week_distance")) || 0;
+    goalWeekTimeSeconds =
+        parseInt(localStorage.getItem("wp_goal_week_time_seconds")) || 0;
+    goalMonthDistanceKm =
+        parseFloat(localStorage.getItem("wp_goal_month_distance")) || 0;
+    goalMonthTimeSeconds =
+        parseInt(localStorage.getItem("wp_goal_month_time_seconds")) || 0;
+    goalThreeMonthDistanceKm =
+        parseFloat(localStorage.getItem("wp_goal_threemonth_distance")) || 0;
+    goalThreeMonthTimeSeconds =
+        parseInt(localStorage.getItem("wp_goal_threemonth_time_seconds")) || 0;
+    goalSixMonthDistanceKm =
+        parseFloat(localStorage.getItem("wp_goal_sixmonth_distance")) || 0;
+    goalSixMonthTimeSeconds =
+        parseInt(localStorage.getItem("wp_goal_sixmonth_time_seconds")) || 0;
+    goalYearDistanceKm =
+        parseFloat(localStorage.getItem("wp_goal_year_distance")) || 0;
+    goalYearTimeSeconds =
+        parseInt(localStorage.getItem("wp_goal_year_time_seconds")) || 0;
+
+    // Auto flags — per-period, default true for new users
+    const loadFlag = (key) =>
+        localStorage.getItem(key) !== null
+            ? localStorage.getItem(key) === "true"
+            : defaultAuto;
+    autoWeek = loadFlag("wp_goal_auto_week");
+    autoMonth = loadFlag("wp_goal_auto_month");
+    autoThreeMonth = loadFlag("wp_goal_auto_threemonth");
+    autoSixMonth = loadFlag("wp_goal_auto_sixmonth");
+    autoYear = loadFlag("wp_goal_auto_year");
+
+    // Populate UI
+    document.getElementById("goalActiveDaysSlider").value = goalActiveDays;
+    document.getElementById("goalActiveDaysDisplay").textContent =
+        goalActiveDays;
+
+    document.getElementById("goalDistanceSlider").value = goalDistanceKm;
+    document.getElementById("goalDistanceDisplay").textContent =
+        goalDistanceKm > 0 ? goalDistanceKm.toFixed(1) : "—";
+
     const timeMins = Math.round(goalTimeSeconds / 60);
-    timeSlider.value = timeMins;
-    document.getElementById("goalTimeDisplay").textContent = goalTimeSeconds > 0 ? timeMins + ":00" : "—";
+    document.getElementById("goalTimeSlider").value = timeMins;
+    document.getElementById("goalTimeDisplay").textContent =
+        goalTimeSeconds > 0 ? timeMins + ":00" : "—";
 
-    const weekDistSlider = document.getElementById("goalWeekDistanceSlider");
-    weekDistSlider.value = goalWeekDistanceKm;
-    document.getElementById("goalWeekDistanceDisplay").textContent = goalWeekDistanceKm > 0 ? goalWeekDistanceKm.toFixed(1) : "—";
+    document.getElementById("goalDaySessionsSlider").value = goalDaySessions;
+    document.getElementById("goalDaySessionsDisplay").textContent =
+        goalDaySessions;
+    document.getElementById("goalWeekSessionsSlider").value = goalWeekSessions;
+    document.getElementById("goalWeekSessionsDisplay").textContent =
+        goalWeekSessions;
+    document.getElementById("goalMonthSessionsSlider").value =
+        goalMonthSessions;
+    document.getElementById("goalMonthSessionsDisplay").textContent =
+        goalMonthSessions || "—";
 
-    const weekTimeSlider = document.getElementById("goalWeekTimeSlider");
-    const weekTimeMins = Math.round(goalWeekTimeSeconds / 60);
-    weekTimeSlider.value = weekTimeMins;
-    document.getElementById("goalWeekTimeDisplay").textContent = goalWeekTimeSeconds > 0 ? formatHHMM(goalWeekTimeSeconds) : "—";
+    syncAutoUI();
 
-    const monthDistSlider = document.getElementById("goalMonthDistanceSlider");
-    monthDistSlider.value = goalMonthDistanceKm;
-    document.getElementById("goalMonthDistanceDisplay").textContent = goalMonthDistanceKm > 0 ? goalMonthDistanceKm.toFixed(1) : "—";
+    // Populate period sliders with stored values (recalculateGoals will override auto ones)
+    document.getElementById("goalWeekDistanceSlider").value =
+        goalWeekDistanceKm;
+    document.getElementById("goalWeekDistanceDisplay").textContent =
+        goalWeekDistanceKm > 0 ? goalWeekDistanceKm.toFixed(1) : "—";
+    document.getElementById("goalWeekTimeSlider").value = Math.round(
+        goalWeekTimeSeconds / 60,
+    );
+    document.getElementById("goalWeekTimeDisplay").textContent =
+        goalWeekTimeSeconds > 0 ? formatHHMM(goalWeekTimeSeconds) : "—";
+    document.getElementById("goalMonthDistanceSlider").value =
+        goalMonthDistanceKm;
+    document.getElementById("goalMonthDistanceDisplay").textContent =
+        goalMonthDistanceKm > 0 ? goalMonthDistanceKm.toFixed(1) : "—";
+    document.getElementById("goalMonthTimeSlider").value = Math.round(
+        goalMonthTimeSeconds / 60,
+    );
+    document.getElementById("goalMonthTimeDisplay").textContent =
+        goalMonthTimeSeconds > 0 ? formatHHMM(goalMonthTimeSeconds) : "—";
+    document.getElementById("goalThreeMonthDistanceSlider").value =
+        goalThreeMonthDistanceKm;
+    document.getElementById("goalThreeMonthDistanceDisplay").textContent =
+        goalThreeMonthDistanceKm > 0
+            ? goalThreeMonthDistanceKm.toFixed(1)
+            : "—";
+    document.getElementById("goalThreeMonthTimeSlider").value = Math.round(
+        goalThreeMonthTimeSeconds / 60,
+    );
+    document.getElementById("goalThreeMonthTimeDisplay").textContent =
+        goalThreeMonthTimeSeconds > 0
+            ? formatHHMM(goalThreeMonthTimeSeconds)
+            : "—";
+    document.getElementById("goalSixMonthDistanceSlider").value =
+        goalSixMonthDistanceKm;
+    document.getElementById("goalSixMonthDistanceDisplay").textContent =
+        goalSixMonthDistanceKm > 0 ? goalSixMonthDistanceKm.toFixed(1) : "—";
+    document.getElementById("goalSixMonthTimeSlider").value = Math.round(
+        goalSixMonthTimeSeconds / 60,
+    );
+    document.getElementById("goalSixMonthTimeDisplay").textContent =
+        goalSixMonthTimeSeconds > 0 ? formatHHMM(goalSixMonthTimeSeconds) : "—";
+    document.getElementById("goalYearDistanceSlider").value =
+        goalYearDistanceKm;
+    document.getElementById("goalYearDistanceDisplay").textContent =
+        goalYearDistanceKm > 0 ? goalYearDistanceKm.toFixed(0) : "—";
+    document.getElementById("goalYearTimeSlider").value = Math.round(
+        goalYearTimeSeconds / 60,
+    );
+    document.getElementById("goalYearTimeDisplay").textContent =
+        goalYearTimeSeconds > 0 ? formatHHMM(goalYearTimeSeconds) : "—";
 
-    const monthTimeSlider = document.getElementById("goalMonthTimeSlider");
-    const monthTimeMins = Math.round(goalMonthTimeSeconds / 60);
-    monthTimeSlider.value = monthTimeMins;
-    document.getElementById("goalMonthTimeDisplay").textContent = goalMonthTimeSeconds > 0 ? formatHHMM(goalMonthTimeSeconds) : "—";
+    // Apply auto-calculations on top of loaded values
+    recalculateGoals();
+}
 
-    const threeMonthDistSlider = document.getElementById("goalThreeMonthDistanceSlider");
-    threeMonthDistSlider.value = goalThreeMonthDistanceKm;
-    document.getElementById("goalThreeMonthDistanceDisplay").textContent = goalThreeMonthDistanceKm > 0 ? goalThreeMonthDistanceKm.toFixed(1) : "—";
+function syncAutoUI() {
+    [
+        ["weekly", autoWeek],
+        ["monthly", autoMonth],
+        ["threemonth", autoThreeMonth],
+        ["sixmonth", autoSixMonth],
+        ["yearly", autoYear],
+    ].forEach(([tab, isAuto]) => {
+        const pip = document.querySelector(
+            `[data-tab="${tab}"] .goal-auto-pip`,
+        );
+        if (pip) pip.classList.toggle("invisible", !isAuto);
+        const id = "goalAuto" + tab.charAt(0).toUpperCase() + tab.slice(1);
+        const cb = document.getElementById(id);
+        if (cb) cb.checked = isAuto;
+    });
+}
 
-    const threeMonthTimeSlider = document.getElementById("goalThreeMonthTimeSlider");
-    threeMonthTimeSlider.value = Math.round(goalThreeMonthTimeSeconds / 60);
-    document.getElementById("goalThreeMonthTimeDisplay").textContent = goalThreeMonthTimeSeconds > 0 ? formatHHMM(goalThreeMonthTimeSeconds) : "—";
+function recalculateGoals() {
+    const N = goalActiveDays;
+    const wkDist = goalDistanceKm * N;
+    const wkTimeMins = Math.round(goalTimeSeconds / 60) * N;
 
-    const sixMonthDistSlider = document.getElementById("goalSixMonthDistanceSlider");
-    sixMonthDistSlider.value = goalSixMonthDistanceKm;
-    document.getElementById("goalSixMonthDistanceDisplay").textContent = goalSixMonthDistanceKm > 0 ? goalSixMonthDistanceKm.toFixed(1) : "—";
+    if (autoWeek) {
+        goalWeekDistanceKm = Math.min(70, Math.round(wkDist / 0.5) * 0.5);
+        localStorage.setItem("wp_goal_week_distance", goalWeekDistanceKm);
+        document.getElementById("goalWeekDistanceSlider").value =
+            goalWeekDistanceKm;
+        document.getElementById("goalWeekDistanceDisplay").textContent =
+            goalWeekDistanceKm > 0 ? goalWeekDistanceKm.toFixed(1) : "—";
 
-    const sixMonthTimeSlider = document.getElementById("goalSixMonthTimeSlider");
-    sixMonthTimeSlider.value = Math.round(goalSixMonthTimeSeconds / 60);
-    document.getElementById("goalSixMonthTimeDisplay").textContent = goalSixMonthTimeSeconds > 0 ? formatHHMM(goalSixMonthTimeSeconds) : "—";
+        const wkMins = Math.min(840, Math.round(wkTimeMins / 15) * 15);
+        goalWeekTimeSeconds = wkMins * 60;
+        localStorage.setItem("wp_goal_week_time_seconds", goalWeekTimeSeconds);
+        document.getElementById("goalWeekTimeSlider").value = wkMins;
+        document.getElementById("goalWeekTimeDisplay").textContent =
+            goalWeekTimeSeconds > 0 ? formatHHMM(goalWeekTimeSeconds) : "—";
 
-    const yearDistSlider = document.getElementById("goalYearDistanceSlider");
-    yearDistSlider.value = goalYearDistanceKm;
-    document.getElementById("goalYearDistanceDisplay").textContent = goalYearDistanceKm > 0 ? goalYearDistanceKm.toFixed(0) : "—";
+        goalWeekSessions = N;
+        localStorage.setItem("wp_goal_week_sessions", goalWeekSessions);
+        document.getElementById("goalWeekSessionsSlider").value =
+            goalWeekSessions;
+        document.getElementById("goalWeekSessionsDisplay").textContent =
+            goalWeekSessions;
+    }
+    if (autoMonth) {
+        goalMonthDistanceKm = Math.min(300, Math.round(wkDist * 4.348));
+        localStorage.setItem("wp_goal_month_distance", goalMonthDistanceKm);
+        document.getElementById("goalMonthDistanceSlider").value =
+            goalMonthDistanceKm;
+        document.getElementById("goalMonthDistanceDisplay").textContent =
+            goalMonthDistanceKm > 0 ? goalMonthDistanceKm.toFixed(1) : "—";
 
-    const yearTimeSlider = document.getElementById("goalYearTimeSlider");
-    const yearTimeMins = Math.round(goalYearTimeSeconds / 60);
-    yearTimeSlider.value = yearTimeMins;
-    document.getElementById("goalYearTimeDisplay").textContent = goalYearTimeSeconds > 0 ? formatHHMM(goalYearTimeSeconds) : "—";
+        const moMins = Math.min(
+            3600,
+            Math.round((wkTimeMins * 4.348) / 30) * 30,
+        );
+        goalMonthTimeSeconds = moMins * 60;
+        localStorage.setItem(
+            "wp_goal_month_time_seconds",
+            goalMonthTimeSeconds,
+        );
+        document.getElementById("goalMonthTimeSlider").value = moMins;
+        document.getElementById("goalMonthTimeDisplay").textContent =
+            goalMonthTimeSeconds > 0 ? formatHHMM(goalMonthTimeSeconds) : "—";
+
+        goalMonthSessions = Math.round(goalWeekSessions * 4.348);
+        localStorage.setItem("wp_goal_month_sessions", goalMonthSessions);
+        document.getElementById("goalMonthSessionsSlider").value =
+            goalMonthSessions;
+        document.getElementById("goalMonthSessionsDisplay").textContent =
+            goalMonthSessions;
+    }
+    if (autoThreeMonth) {
+        goalThreeMonthDistanceKm = Math.min(
+            600,
+            Math.round((wkDist * 13.04) / 5) * 5,
+        );
+        localStorage.setItem(
+            "wp_goal_threemonth_distance",
+            goalThreeMonthDistanceKm,
+        );
+        document.getElementById("goalThreeMonthDistanceSlider").value =
+            goalThreeMonthDistanceKm;
+        document.getElementById("goalThreeMonthDistanceDisplay").textContent =
+            goalThreeMonthDistanceKm > 0
+                ? goalThreeMonthDistanceKm.toFixed(1)
+                : "—";
+
+        const q1Mins = Math.min(
+            10800,
+            Math.round((wkTimeMins * 13.04) / 60) * 60,
+        );
+        goalThreeMonthTimeSeconds = q1Mins * 60;
+        localStorage.setItem(
+            "wp_goal_threemonth_time_seconds",
+            goalThreeMonthTimeSeconds,
+        );
+        document.getElementById("goalThreeMonthTimeSlider").value = q1Mins;
+        document.getElementById("goalThreeMonthTimeDisplay").textContent =
+            goalThreeMonthTimeSeconds > 0
+                ? formatHHMM(goalThreeMonthTimeSeconds)
+                : "—";
+    }
+    if (autoSixMonth) {
+        goalSixMonthDistanceKm = Math.min(
+            1200,
+            Math.round((wkDist * 26.09) / 10) * 10,
+        );
+        localStorage.setItem(
+            "wp_goal_sixmonth_distance",
+            goalSixMonthDistanceKm,
+        );
+        document.getElementById("goalSixMonthDistanceSlider").value =
+            goalSixMonthDistanceKm;
+        document.getElementById("goalSixMonthDistanceDisplay").textContent =
+            goalSixMonthDistanceKm > 0
+                ? goalSixMonthDistanceKm.toFixed(1)
+                : "—";
+
+        const s6Mins = Math.min(
+            21600,
+            Math.round((wkTimeMins * 26.09) / 60) * 60,
+        );
+        goalSixMonthTimeSeconds = s6Mins * 60;
+        localStorage.setItem(
+            "wp_goal_sixmonth_time_seconds",
+            goalSixMonthTimeSeconds,
+        );
+        document.getElementById("goalSixMonthTimeSlider").value = s6Mins;
+        document.getElementById("goalSixMonthTimeDisplay").textContent =
+            goalSixMonthTimeSeconds > 0
+                ? formatHHMM(goalSixMonthTimeSeconds)
+                : "—";
+    }
+    if (autoYear) {
+        goalYearDistanceKm = Math.min(
+            3000,
+            Math.round((wkDist * 52.18) / 10) * 10,
+        );
+        localStorage.setItem("wp_goal_year_distance", goalYearDistanceKm);
+        document.getElementById("goalYearDistanceSlider").value =
+            goalYearDistanceKm;
+        document.getElementById("goalYearDistanceDisplay").textContent =
+            goalYearDistanceKm > 0 ? goalYearDistanceKm.toFixed(0) : "—";
+
+        const yrMins = Math.min(
+            43200,
+            Math.round((wkTimeMins * 52.18) / 60) * 60,
+        );
+        goalYearTimeSeconds = yrMins * 60;
+        localStorage.setItem("wp_goal_year_time_seconds", goalYearTimeSeconds);
+        document.getElementById("goalYearTimeSlider").value = yrMins;
+        document.getElementById("goalYearTimeDisplay").textContent =
+            goalYearTimeSeconds > 0 ? formatHHMM(goalYearTimeSeconds) : "—";
+    }
+    updateGoalProgress();
 }
 
 function updateGoalProgress() {
@@ -1017,79 +2071,155 @@ function updateGoalProgress() {
     if (goalDistanceKm > 0) {
         const pct = Math.min(100, (today.dist / goalDistanceKm) * 100);
         document.getElementById("goalDistanceBar").style.width = pct + "%";
-        document.getElementById("goalDistanceProgress").textContent = today.dist.toFixed(2);
-        document.getElementById("goalDistanceTarget").textContent = goalDistanceKm.toFixed(1);
+        document.getElementById("goalDistanceProgress").textContent =
+            today.dist.toFixed(2);
+        document.getElementById("goalDistanceTarget").textContent =
+            goalDistanceKm.toFixed(1);
     }
     if (goalTimeSeconds > 0) {
         const pct = Math.min(100, (today.time / goalTimeSeconds) * 100);
         document.getElementById("goalTimeBar").style.width = pct + "%";
-        document.getElementById("goalTimeProgress").textContent = new Date(today.time * 1000).toISOString().slice(11, 19);
-        document.getElementById("goalTimeTarget").textContent = formatSeconds(goalTimeSeconds);
+        document.getElementById("goalTimeProgress").textContent = new Date(
+            today.time * 1000,
+        )
+            .toISOString()
+            .slice(11, 19);
+        document.getElementById("goalTimeTarget").textContent =
+            formatSeconds(goalTimeSeconds);
     }
     const week = getPeriodStats(7);
     if (goalWeekDistanceKm > 0) {
         const pct = Math.min(100, (week.dist / goalWeekDistanceKm) * 100);
         document.getElementById("weekGoalBar").style.width = pct + "%";
-        document.getElementById("weekGoalProgress").textContent = week.dist.toFixed(2);
-        document.getElementById("weekGoalTarget").textContent = goalWeekDistanceKm.toFixed(1);
+        document.getElementById("weekGoalProgress").textContent =
+            week.dist.toFixed(2);
+        document.getElementById("weekGoalTarget").textContent =
+            goalWeekDistanceKm.toFixed(1);
     }
     if (goalWeekTimeSeconds > 0) {
         const pct = Math.min(100, (week.time / goalWeekTimeSeconds) * 100);
         document.getElementById("weekTimeGoalBar").style.width = pct + "%";
-        document.getElementById("weekTimeGoalProgress").textContent = new Date(week.time * 1000).toISOString().slice(11, 19);
-        document.getElementById("weekTimeGoalTarget").textContent = formatHHMM(goalWeekTimeSeconds);
+        document.getElementById("weekTimeGoalProgress").textContent = new Date(
+            week.time * 1000,
+        )
+            .toISOString()
+            .slice(11, 19);
+        document.getElementById("weekTimeGoalTarget").textContent =
+            formatHHMM(goalWeekTimeSeconds);
     }
     const month = getPeriodStats(30);
     if (goalMonthDistanceKm > 0) {
         const pct = Math.min(100, (month.dist / goalMonthDistanceKm) * 100);
         document.getElementById("monthGoalBar").style.width = pct + "%";
-        document.getElementById("monthGoalProgress").textContent = month.dist.toFixed(2);
-        document.getElementById("monthGoalTarget").textContent = goalMonthDistanceKm.toFixed(1);
+        document.getElementById("monthGoalProgress").textContent =
+            month.dist.toFixed(2);
+        document.getElementById("monthGoalTarget").textContent =
+            goalMonthDistanceKm.toFixed(1);
     }
     if (goalMonthTimeSeconds > 0) {
         const pct = Math.min(100, (month.time / goalMonthTimeSeconds) * 100);
         document.getElementById("monthTimeGoalBar").style.width = pct + "%";
-        document.getElementById("monthTimeGoalProgress").textContent = new Date(month.time * 1000).toISOString().slice(11, 19);
-        document.getElementById("monthTimeGoalTarget").textContent = formatHHMM(goalMonthTimeSeconds);
+        document.getElementById("monthTimeGoalProgress").textContent = new Date(
+            month.time * 1000,
+        )
+            .toISOString()
+            .slice(11, 19);
+        document.getElementById("monthTimeGoalTarget").textContent =
+            formatHHMM(goalMonthTimeSeconds);
     }
     const threeMonth = getPeriodStats(91);
     if (goalThreeMonthDistanceKm > 0) {
-        const pct = Math.min(100, (threeMonth.dist / goalThreeMonthDistanceKm) * 100);
+        const pct = Math.min(
+            100,
+            (threeMonth.dist / goalThreeMonthDistanceKm) * 100,
+        );
         document.getElementById("threeMonthGoalBar").style.width = pct + "%";
-        document.getElementById("threeMonthGoalProgress").textContent = threeMonth.dist.toFixed(2);
-        document.getElementById("threeMonthGoalTarget").textContent = goalThreeMonthDistanceKm.toFixed(1);
+        document.getElementById("threeMonthGoalProgress").textContent =
+            threeMonth.dist.toFixed(2);
+        document.getElementById("threeMonthGoalTarget").textContent =
+            goalThreeMonthDistanceKm.toFixed(1);
     }
     if (goalThreeMonthTimeSeconds > 0) {
-        const pct = Math.min(100, (threeMonth.time / goalThreeMonthTimeSeconds) * 100);
-        document.getElementById("threeMonthTimeGoalBar").style.width = pct + "%";
-        document.getElementById("threeMonthTimeGoalProgress").textContent = new Date(threeMonth.time * 1000).toISOString().slice(11, 19);
-        document.getElementById("threeMonthTimeGoalTarget").textContent = formatHHMM(goalThreeMonthTimeSeconds);
+        const pct = Math.min(
+            100,
+            (threeMonth.time / goalThreeMonthTimeSeconds) * 100,
+        );
+        document.getElementById("threeMonthTimeGoalBar").style.width =
+            pct + "%";
+        document.getElementById("threeMonthTimeGoalProgress").textContent =
+            new Date(threeMonth.time * 1000).toISOString().slice(11, 19);
+        document.getElementById("threeMonthTimeGoalTarget").textContent =
+            formatHHMM(goalThreeMonthTimeSeconds);
     }
     const sixMonth = getPeriodStats(182);
     if (goalSixMonthDistanceKm > 0) {
-        const pct = Math.min(100, (sixMonth.dist / goalSixMonthDistanceKm) * 100);
+        const pct = Math.min(
+            100,
+            (sixMonth.dist / goalSixMonthDistanceKm) * 100,
+        );
         document.getElementById("sixMonthGoalBar").style.width = pct + "%";
-        document.getElementById("sixMonthGoalProgress").textContent = sixMonth.dist.toFixed(2);
-        document.getElementById("sixMonthGoalTarget").textContent = goalSixMonthDistanceKm.toFixed(1);
+        document.getElementById("sixMonthGoalProgress").textContent =
+            sixMonth.dist.toFixed(2);
+        document.getElementById("sixMonthGoalTarget").textContent =
+            goalSixMonthDistanceKm.toFixed(1);
     }
     if (goalSixMonthTimeSeconds > 0) {
-        const pct = Math.min(100, (sixMonth.time / goalSixMonthTimeSeconds) * 100);
+        const pct = Math.min(
+            100,
+            (sixMonth.time / goalSixMonthTimeSeconds) * 100,
+        );
         document.getElementById("sixMonthTimeGoalBar").style.width = pct + "%";
-        document.getElementById("sixMonthTimeGoalProgress").textContent = new Date(sixMonth.time * 1000).toISOString().slice(11, 19);
-        document.getElementById("sixMonthTimeGoalTarget").textContent = formatHHMM(goalSixMonthTimeSeconds);
+        document.getElementById("sixMonthTimeGoalProgress").textContent =
+            new Date(sixMonth.time * 1000).toISOString().slice(11, 19);
+        document.getElementById("sixMonthTimeGoalTarget").textContent =
+            formatHHMM(goalSixMonthTimeSeconds);
     }
     const year = getPeriodStats(365);
     if (goalYearDistanceKm > 0) {
         const pct = Math.min(100, (year.dist / goalYearDistanceKm) * 100);
         document.getElementById("yearGoalBar").style.width = pct + "%";
-        document.getElementById("yearGoalProgress").textContent = year.dist.toFixed(2);
-        document.getElementById("yearGoalTarget").textContent = goalYearDistanceKm.toFixed(0);
+        document.getElementById("yearGoalProgress").textContent =
+            year.dist.toFixed(2);
+        document.getElementById("yearGoalTarget").textContent =
+            goalYearDistanceKm.toFixed(0);
     }
     if (goalYearTimeSeconds > 0) {
         const pct = Math.min(100, (year.time / goalYearTimeSeconds) * 100);
         document.getElementById("yearTimeGoalBar").style.width = pct + "%";
-        document.getElementById("yearTimeGoalProgress").textContent = new Date(year.time * 1000).toISOString().slice(11, 19);
-        document.getElementById("yearTimeGoalTarget").textContent = formatHHMM(goalYearTimeSeconds);
+        document.getElementById("yearTimeGoalProgress").textContent = new Date(
+            year.time * 1000,
+        )
+            .toISOString()
+            .slice(11, 19);
+        document.getElementById("yearTimeGoalTarget").textContent =
+            formatHHMM(goalYearTimeSeconds);
+    }
+    if (goalDaySessions > 0) {
+        const daySess = getPeriodStats(1).sess;
+        const pct = Math.min(100, (daySess / goalDaySessions) * 100);
+        document.getElementById("daySessionsGoalBar").style.width = pct + "%";
+        document.getElementById("daySessionsGoalProgress").textContent =
+            daySess;
+        document.getElementById("daySessionsGoalTarget").textContent =
+            goalDaySessions;
+    }
+    if (goalWeekSessions > 0) {
+        const weekSess = getPeriodStats(7).sess;
+        const pct = Math.min(100, (weekSess / goalWeekSessions) * 100);
+        document.getElementById("weekSessionsGoalBar").style.width = pct + "%";
+        document.getElementById("weekSessionsGoalProgress").textContent =
+            weekSess;
+        document.getElementById("weekSessionsGoalTarget").textContent =
+            goalWeekSessions;
+    }
+    if (goalMonthSessions > 0) {
+        const monthSess = getPeriodStats(30).sess;
+        const pct = Math.min(100, (monthSess / goalMonthSessions) * 100);
+        document.getElementById("monthSessionsGoalBar").style.width = pct + "%";
+        document.getElementById("monthSessionsGoalProgress").textContent =
+            monthSess;
+        document.getElementById("monthSessionsGoalTarget").textContent =
+            goalMonthSessions;
     }
 }
 
@@ -1122,11 +2252,13 @@ function updateTodayTotals() {
     const fmt = (sec) => new Date(sec * 1000).toISOString().slice(11, 19);
     document.getElementById("todayDistance").textContent = s.dist.toFixed(2);
     document.getElementById("todayCalories").textContent = Math.round(s.cal);
-    document.getElementById("todayTime").textContent     = fmt(s.time);
-    document.getElementById("todayAvgSpeed").textContent = s.avgSpeed.toFixed(2);
+    document.getElementById("todayTime").textContent = fmt(s.time);
+    document.getElementById("todayAvgSpeed").textContent =
+        s.avgSpeed.toFixed(2);
     document.getElementById("todaySessions").textContent = s.sess;
-    document.getElementById("todayPauses").textContent   = s.pauses;
-    document.getElementById("todayActive").textContent   = getActiveDays(1) + "/1";
+    document.getElementById("todayPauses").textContent = s.pauses;
+    document.getElementById("todayActive").textContent =
+        getActiveDays(1) + "/1";
 }
 
 // ============================================================
@@ -1134,124 +2266,178 @@ function updateTodayTotals() {
 // ============================================================
 
 function getPeriodStats(days) {
-    const history  = JSON.parse(localStorage.getItem("wp_history") || "{}");
-    const today    = new Date().toISOString().slice(0, 10);
-    const cutoff   = new Date(Date.now() - (days - 1) * 86400000).toISOString().slice(0, 10);
-    let dist = 0, cal = 0, time = 0, spdSum = 0, spdSamp = 0, sess = 0, pauses = 0, maxSpd = 0;
+    const history = loadHistory();
+    const today = new Date().toISOString().slice(0, 10);
+    const cutoff = new Date(Date.now() - (days - 1) * 86400000)
+        .toISOString()
+        .slice(0, 10);
+    let dist = 0,
+        cal = 0,
+        time = 0,
+        spdSum = 0,
+        spdSamp = 0,
+        sess = 0,
+        pauses = 0,
+        maxSpd = 0;
     Object.entries(history).forEach(([date, d]) => {
         if (date >= cutoff && date <= today) {
-            dist    += d.distance    || 0;
-            cal     += d.calories    || 0;
-            time    += d.timeSeconds || 0;
-            spdSum  += d.speedSum    || 0;
+            dist += d.distance || 0;
+            cal += d.calories || 0;
+            time += d.timeSeconds || 0;
+            spdSum += d.speedSum || 0;
             spdSamp += d.speedSamples || 0;
-            sess    += d.sessions    || 0;
-            pauses  += d.pauses      || 0;
-            maxSpd   = Math.max(maxSpd, d.maxSpeed || 0);
+            sess += d.sessions || 0;
+            pauses += d.pauses || 0;
+            maxSpd = Math.max(maxSpd, d.maxSpeed || 0);
         }
     });
     // Add current unsaved session delta for today
     if (today >= cutoff) {
-        dist    += Math.max(0, cumDistance    - lastHistoryDistance);
-        cal     += Math.max(0, cumCalories    - lastHistoryCalories);
-        time    += Math.max(0, cumTimeSeconds - lastHistoryTimeSeconds);
-        spdSum  += Math.max(0, speedSum       - lastHistorySpeedSum);
-        spdSamp += Math.max(0, speedSamples   - lastHistorySpeedSamples);
-        pauses  += Math.max(0, pauseCount     - lastHistoryPauseCount);
-        maxSpd   = Math.max(maxSpd, maxSpeed);
+        dist += Math.max(0, cumDistance - lastHistoryDistance);
+        cal += Math.max(0, cumCalories - lastHistoryCalories);
+        time += Math.max(0, cumTimeSeconds - lastHistoryTimeSeconds);
+        spdSum += Math.max(0, speedSum - lastHistorySpeedSum);
+        spdSamp += Math.max(0, speedSamples - lastHistorySpeedSamples);
+        pauses += Math.max(0, pauseCount - lastHistoryPauseCount);
+        maxSpd = Math.max(maxSpd, maxSpeed);
     }
     const avgSpeed = spdSamp > 0 ? spdSum / spdSamp : 0;
     return { dist, cal, time, avgSpeed, sess, pauses, maxSpd };
 }
 
 function updatePeriodStats() {
-    const week       = getPeriodStats(7);
-    const month      = getPeriodStats(30);
+    const week = getPeriodStats(7);
+    const month = getPeriodStats(30);
     const threeMonth = getPeriodStats(91);
-    const sixMonth   = getPeriodStats(182);
-    const year       = getPeriodStats(365);
+    const sixMonth = getPeriodStats(182);
+    const year = getPeriodStats(365);
 
     const fmt = (s) => new Date(s * 1000).toISOString().slice(11, 19);
 
-    document.getElementById("weekDist").textContent     = week.dist.toFixed(2);
-    document.getElementById("weekCal").textContent      = Math.round(week.cal);
-    document.getElementById("weekTime").textContent     = fmt(week.time);
-    document.getElementById("weekAvgSpd").textContent   = week.avgSpeed.toFixed(2);
+    document.getElementById("weekDist").textContent = week.dist.toFixed(2);
+    document.getElementById("weekCal").textContent = Math.round(week.cal);
+    document.getElementById("weekTime").textContent = fmt(week.time);
+    document.getElementById("weekAvgSpd").textContent =
+        week.avgSpeed.toFixed(2);
     document.getElementById("weekSessions").textContent = week.sess;
-    document.getElementById("weekPauses").textContent   = week.pauses;
+    document.getElementById("weekPauses").textContent = week.pauses;
 
-    document.getElementById("monthDist").textContent     = month.dist.toFixed(2);
-    document.getElementById("monthCal").textContent      = Math.round(month.cal);
-    document.getElementById("monthTime").textContent     = fmt(month.time);
-    document.getElementById("monthAvgSpd").textContent   = month.avgSpeed.toFixed(2);
+    document.getElementById("monthDist").textContent = month.dist.toFixed(2);
+    document.getElementById("monthCal").textContent = Math.round(month.cal);
+    document.getElementById("monthTime").textContent = fmt(month.time);
+    document.getElementById("monthAvgSpd").textContent =
+        month.avgSpeed.toFixed(2);
     document.getElementById("monthSessions").textContent = month.sess;
-    document.getElementById("monthPauses").textContent   = month.pauses;
+    document.getElementById("monthPauses").textContent = month.pauses;
 
-    document.getElementById("threeMonthDist").textContent     = threeMonth.dist.toFixed(2);
-    document.getElementById("threeMonthCal").textContent      = Math.round(threeMonth.cal);
-    document.getElementById("threeMonthTime").textContent     = fmt(threeMonth.time);
-    document.getElementById("threeMonthAvgSpd").textContent   = threeMonth.avgSpeed.toFixed(2);
+    document.getElementById("threeMonthDist").textContent =
+        threeMonth.dist.toFixed(2);
+    document.getElementById("threeMonthCal").textContent = Math.round(
+        threeMonth.cal,
+    );
+    document.getElementById("threeMonthTime").textContent = fmt(
+        threeMonth.time,
+    );
+    document.getElementById("threeMonthAvgSpd").textContent =
+        threeMonth.avgSpeed.toFixed(2);
     document.getElementById("threeMonthSessions").textContent = threeMonth.sess;
-    document.getElementById("threeMonthPauses").textContent   = threeMonth.pauses;
+    document.getElementById("threeMonthPauses").textContent = threeMonth.pauses;
 
-    document.getElementById("sixMonthDist").textContent     = sixMonth.dist.toFixed(2);
-    document.getElementById("sixMonthCal").textContent      = Math.round(sixMonth.cal);
-    document.getElementById("sixMonthTime").textContent     = fmt(sixMonth.time);
-    document.getElementById("sixMonthAvgSpd").textContent   = sixMonth.avgSpeed.toFixed(2);
+    document.getElementById("sixMonthDist").textContent =
+        sixMonth.dist.toFixed(2);
+    document.getElementById("sixMonthCal").textContent = Math.round(
+        sixMonth.cal,
+    );
+    document.getElementById("sixMonthTime").textContent = fmt(sixMonth.time);
+    document.getElementById("sixMonthAvgSpd").textContent =
+        sixMonth.avgSpeed.toFixed(2);
     document.getElementById("sixMonthSessions").textContent = sixMonth.sess;
-    document.getElementById("sixMonthPauses").textContent   = sixMonth.pauses;
+    document.getElementById("sixMonthPauses").textContent = sixMonth.pauses;
 
-    document.getElementById("yearDist").textContent     = year.dist.toFixed(2);
-    document.getElementById("yearCal").textContent      = Math.round(year.cal);
-    document.getElementById("yearTime").textContent     = fmt(year.time);
-    document.getElementById("yearAvgSpd").textContent   = year.avgSpeed.toFixed(2);
+    document.getElementById("yearDist").textContent = year.dist.toFixed(2);
+    document.getElementById("yearCal").textContent = Math.round(year.cal);
+    document.getElementById("yearTime").textContent = fmt(year.time);
+    document.getElementById("yearAvgSpd").textContent =
+        year.avgSpeed.toFixed(2);
     document.getElementById("yearSessions").textContent = year.sess;
-    document.getElementById("yearPauses").textContent   = year.pauses;
+    document.getElementById("yearPauses").textContent = year.pauses;
 
-    document.getElementById("weekActive").textContent       = getActiveDays(7) + "/7";
-    document.getElementById("monthActive").textContent      = getActiveDays(30) + "/30";
-    document.getElementById("threeMonthActive").textContent = getActiveDays(91) + "/91";
-    document.getElementById("sixMonthActive").textContent   = getActiveDays(182) + "/182";
-    document.getElementById("yearActive").textContent       = getActiveDays(365) + "/365";
+    document.getElementById("weekActive").textContent = getActiveDays(7) + "/7";
+    document.getElementById("monthActive").textContent =
+        getActiveDays(30) + "/30";
+    document.getElementById("threeMonthActive").textContent =
+        getActiveDays(91) + "/91";
+    document.getElementById("sixMonthActive").textContent =
+        getActiveDays(182) + "/182";
+    document.getElementById("yearActive").textContent =
+        getActiveDays(365) + "/365";
 }
 
 function getAllTimeExtras() {
-    const history = JSON.parse(localStorage.getItem("wp_history") || "{}");
-    let bestDayDist = 0, bestDayDate = null, totalSessions = 0;
-    let bestAvgSpeed = 0, bestAvgSpeedDate = null;
+    const history = loadHistory();
+    let bestDayDist = 0,
+        bestDayDate = null,
+        totalSessions = 0;
+    let bestAvgSpeed = 0,
+        bestAvgSpeedDate = null;
     Object.entries(history).forEach(([date, d]) => {
-        if ((d.distance || 0) > bestDayDist) { bestDayDist = d.distance; bestDayDate = date; }
+        if ((d.distance || 0) > bestDayDist) {
+            bestDayDist = d.distance;
+            bestDayDate = date;
+        }
         totalSessions += d.sessions || 0;
-        if ((d.avgSpeed || 0) > bestAvgSpeed) { bestAvgSpeed = d.avgSpeed; bestAvgSpeedDate = date; }
+        const avg = d.speedSamples > 0 ? d.speedSum / d.speedSamples : 0;
+        if (avg > bestAvgSpeed) {
+            bestAvgSpeed = avg;
+            bestAvgSpeedDate = date;
+        }
     });
-    return { bestDayDist, bestDayDate, totalSessions, bestAvgSpeed, bestAvgSpeedDate };
+    return {
+        bestDayDist,
+        bestDayDate,
+        totalSessions,
+        bestAvgSpeed,
+        bestAvgSpeedDate,
+    };
 }
 
 function getStreak() {
-    const history = JSON.parse(localStorage.getItem("wp_history") || "{}");
+    const history = loadHistory();
     const todayKey = new Date().toISOString().slice(0, 10);
-    const todayActive = (history[todayKey] && (history[todayKey].distance || 0) > 0) || cumDistance > 0;
+    const todayActive =
+        (history[todayKey] && (history[todayKey].distance || 0) > 0) ||
+        cumDistance > 0;
     const d = new Date();
     if (!todayActive) d.setDate(d.getDate() - 1);
     let streak = 0;
     while (streak < 365) {
         const key = d.toISOString().slice(0, 10);
-        const active = key === todayKey ? todayActive : (history[key] && (history[key].distance || 0) > 0);
-        if (active) { streak++; d.setDate(d.getDate() - 1); }
-        else break;
+        const active =
+            key === todayKey
+                ? todayActive
+                : history[key] && (history[key].distance || 0) > 0;
+        if (active) {
+            streak++;
+            d.setDate(d.getDate() - 1);
+        } else break;
     }
     return streak;
 }
 
 function getActiveDays(days) {
-    const history = JSON.parse(localStorage.getItem("wp_history") || "{}");
+    const history = loadHistory();
     const todayKey = new Date().toISOString().slice(0, 10);
-    const todayActive = (history[todayKey] && (history[todayKey].distance || 0) > 0) || cumDistance > 0;
+    const todayActive =
+        (history[todayKey] && (history[todayKey].distance || 0) > 0) ||
+        cumDistance > 0;
     let count = 0;
     const d = new Date();
     for (let i = 0; i < days; i++) {
         const key = d.toISOString().slice(0, 10);
-        const active = key === todayKey ? todayActive : (history[key] && (history[key].distance || 0) > 0);
+        const active =
+            key === todayKey
+                ? todayActive
+                : history[key] && (history[key].distance || 0) > 0;
         if (active) count++;
         d.setDate(d.getDate() - 1);
     }
@@ -1259,14 +2445,25 @@ function getActiveDays(days) {
 }
 
 function updateAllTimeExtras() {
-    const { bestDayDist, bestDayDate, totalSessions, bestAvgSpeed, bestAvgSpeedDate } = getAllTimeExtras();
-    document.getElementById("allTimeBestDay").textContent =
-        bestDayDate ? `${bestDayDist.toFixed(2)} km (${bestDayDate})` : "—";
+    const {
+        bestDayDist,
+        bestDayDate,
+        totalSessions,
+        bestAvgSpeed,
+        bestAvgSpeedDate,
+    } = getAllTimeExtras();
+    document.getElementById("allTimeBestDay").textContent = bestDayDate
+        ? `${bestDayDist.toFixed(2)} km (${bestDayDate})`
+        : "—";
     document.getElementById("allTimeTotalSessions").textContent = totalSessions;
-    document.getElementById("allTimeStreak").textContent = getStreak() + " days";
-    document.getElementById("allTimeActive30").textContent = getActiveDays(30) + "/30";
+    document.getElementById("allTimeStreak").textContent =
+        getStreak() + " days";
+    document.getElementById("allTimeActive30").textContent =
+        getActiveDays(30) + "/30";
     document.getElementById("allTimeBestAvgSpeed").textContent =
-        bestAvgSpeedDate ? `${bestAvgSpeed.toFixed(2)} km/h (${bestAvgSpeedDate})` : "—";
+        bestAvgSpeedDate
+            ? `${bestAvgSpeed.toFixed(2)} km/h (${bestAvgSpeedDate})`
+            : "—";
 }
 
 // ============================================================
@@ -1277,22 +2474,36 @@ function showOnboardingModal() {
     const modal = document.getElementById("onboardingModal");
     modal.classList.remove("hidden");
     modal.classList.add("flex");
+    applyHeightToOnboardingInputs();
 }
 
 function saveOnboarding() {
     const w = parseFloat(document.getElementById("onboardingWeight").value);
-    const h = document.getElementById("onboardingHeight").value.trim();
     const a = parseInt(document.getElementById("onboardingAge").value);
     const err = document.getElementById("onboardingError");
-    if (!w || !h || !a) { err.classList.remove("hidden"); return; }
+    let newHeightCm;
+    if (userHeightUnit === "ftin") {
+        const ft = parseInt(document.getElementById("onboardingHeightFt").value, 10);
+        const inches = parseInt(document.getElementById("onboardingHeightIn").value, 10);
+        newHeightCm = isNaN(ft) || isNaN(inches) ? NaN : ftInToCm(ft, inches);
+    } else {
+        newHeightCm = parseFloat(document.getElementById("onboardingHeightCm").value);
+    }
+    if (!w || isNaN(newHeightCm) || newHeightCm <= 0 || !a) {
+        err.classList.remove("hidden");
+        return;
+    }
     err.classList.add("hidden");
-    userWeight = w; userHeight = h; userAge = a;
+    userWeight = w;
+    userHeightCm = newHeightCm;
+    userAge = a;
     localStorage.setItem("wp_weight", userWeight);
-    localStorage.setItem("wp_height", userHeight);
+    localStorage.setItem("wp_height_cm", userHeightCm);
+    localStorage.setItem("wp_height_unit", userHeightUnit);
     localStorage.setItem("wp_age", userAge);
     document.getElementById("weightInput").value = userWeight;
-    document.getElementById("heightInput").value = userHeight;
-    document.getElementById("ageInput").value    = userAge;
+    applyHeightToSettingsInputs();
+    document.getElementById("ageInput").value = userAge;
     const modal = document.getElementById("onboardingModal");
     modal.classList.add("hidden");
     modal.classList.remove("flex");
@@ -1307,7 +2518,6 @@ function toggleSection(contentId, chevronId) {
     document.getElementById(chevronId).classList.toggle("rotate-180");
 }
 
-
 // ============================================================
 // Light/Dark Mode
 // ============================================================
@@ -1320,9 +2530,10 @@ function applyTheme(isDark) {
     }
     if (wpCharts.distance) renderCharts();
     if (wpCharts.liveSpeed) {
-        wpCharts.liveSpeed.destroy();
-        wpCharts.liveSpeed = null;
-        initLiveSpeedChart();
+        const tickColor = isDark ? "#e5e7eb" : "#374151";
+        wpCharts.liveSpeed.options.scales.x.ticks.color = tickColor;
+        wpCharts.liveSpeed.options.scales.y.ticks.color = tickColor;
+        wpCharts.liveSpeed.update();
     }
 }
 
@@ -1349,30 +2560,36 @@ function hideContinueModal() {
 // ============================================================
 
 let autoBackupTick = 0;
+let statsIntervalId = null;
 
-setInterval(() => {
+statsIntervalId = setInterval(() => {
     const speed = currentSpeed || 0;
-    const now   = Date.now();
-    const dt    = (now - lastDistanceUpdate) / 3600000;
+    const now = Date.now();
+    const dt = (now - lastDistanceUpdate) / 3600000;
 
     autoBackupTick++;
-    if (autoBackupTick % 10 === 0 && cumDistance > 0 && (isRunning || isPaused)) {
+    if (
+        autoBackupTick % 10 === 0 &&
+        cumDistance > 0 &&
+        (isRunning || isPaused)
+    ) {
         saveSessionBackup();
     }
 
     if (dt > 0) {
         if (speed > 0) {
-            estimatedDistanceKm  += speed * dt;
+            estimatedDistanceKm += speed * dt;
             cumEstimatedDistance += speed * dt;
         }
         lastDistanceUpdate = now;
     }
 
-    const heightInput = document.getElementById("heightInput")?.value || defaultHeight;
-    const currentStepsEst = estimateSteps(estimatedDistanceKm, heightInput);
-    if (document.getElementById("currentSteps")) document.getElementById("currentSteps").textContent = currentStepsEst;
-    const cumStepsEst = estimateSteps(cumEstimatedDistance, heightInput);
-    if (document.getElementById("cumSteps")) document.getElementById("cumSteps").textContent = cumStepsEst;
+    currentSteps = estimateSteps(cumEstimatedDistance, userHeightCm);
+    if (document.getElementById("currentSteps"))
+        document.getElementById("currentSteps").textContent = currentSteps;
+    cumSteps = estimateSteps(cumEstimatedDistance, userHeightCm);
+    if (document.getElementById("cumSteps"))
+        document.getElementById("cumSteps").textContent = cumSteps;
 
     const powerThisSecond = estimatePower(currentSpeed, userWeight);
     cumPower = powerThisSecond;
@@ -1393,46 +2610,83 @@ document.getElementById("lightDarkModeBtn").addEventListener("click", () => {
 });
 
 document.getElementById("startBtn").addEventListener("click", () => {
-    showContinueModal();
+    if (!cFTMSControl) {
+        showStartupIndicator(0);
+        return;
+    }
+    const hasPreviousStats = cumDistance > 0 || cumTimeSeconds > 0 || cumCalories > 0;
+    if (hasPreviousStats) {
+        showContinueModal();
+    } else {
+        setStatus("Starting…", "bg-yellow-400");
+        ftmsCmd([0x07]);
+        showStartupIndicator(0);
+    }
 });
 
-document.getElementById("continueYesBtn").addEventListener("click", async () => {
-    hideContinueModal();
-    loadCumulativeStats();
-    updateCumulativeStats();
-    localStorage.removeItem("wp_session_backup");
-    updateRecoverBtn();
-    setStatus("Starting…", "bg-yellow-400");
-    ftmsCmd([0x07]);
-});
+document
+    .getElementById("continueYesBtn")
+    .addEventListener("click", async () => {
+        hideContinueModal();
+        if (!cFTMSControl) {
+            showStartupIndicator(0);
+            return;
+        }
+        loadCumulativeStats();
+        updateCumulativeStats();
+        localStorage.removeItem("wp_session_backup");
+        updateRecoverBtn();
+        setStatus("Starting…", "bg-yellow-400");
+        ftmsCmd([0x07]);
+        showStartupIndicator(0);
+    });
 
 document.getElementById("continueNoBtn").addEventListener("click", () => {
     hideContinueModal();
+    if (!cFTMSControl) {
+        showStartupIndicator(0);
+        return;
+    }
     saveSessionBackup();
-    cumDistance = 0; cumCalories = 0; cumTimeSeconds = 0;
-    pauseCount = 0; totalPauseTime = 0; cumTotalPower = 0;
-    maxSpeed = 0; speedSum = 0; speedSamples = 0;
-    estimatedDistanceKm = 0; cumEstimatedDistance = 0;
-    liveSpeedData = []; liveSpeedLabels = []; liveSecondCount = 0;
-    lastHistoryDistance = 0; lastHistoryCalories = 0;
-    lastHistorySpeedSum = 0; lastHistorySpeedSamples = 0;
+    cumDistance = 0;
+    cumCalories = 0;
+    cumTimeSeconds = 0;
+    pauseCount = 0;
+    totalPauseTime = 0;
+    cumTotalPower = 0;
+    maxSpeed = 0;
+    speedSum = 0;
+    speedSamples = 0;
+    estimatedDistanceKm = 0;
+    cumEstimatedDistance = 0;
+    liveSpeedData = [];
+    liveSpeedLabels = [];
+    liveSecondCount = 0;
+    lastHistoryDistance = 0;
+    lastHistoryCalories = 0;
+    lastHistorySpeedSum = 0;
+    lastHistorySpeedSamples = 0;
+    lastHistoryTimeSeconds = 0;
+    lastHistoryPauseCount = 0;
+    lastHistorySteps = 0;
+    cumSteps = 0;
+    currentSteps = 0;
     autoSaveCumulativeStats();
     setStatus("Starting…", "bg-yellow-400");
     ftmsCmd([0x07]);
+    showStartupIndicator(0);
 });
 
 document.getElementById("stopBtn").addEventListener("click", () => {
     haptic([50, 30, 50]);
     isPaused = false;
     ftmsCmd([0x08, 0x01]);
-    exportStats();
 });
 
 document.getElementById("pauseBtn").addEventListener("click", () => {
-    if (isRunning) {
+    if (isRunning && !isPaused) {
         haptic();
-        isPaused  = true;
-        isRunning = false;
+        isPaused = true;
         pauseCount++;
         pauseStartTimestamp = Date.now();
         ftmsCmd([0x08, 0x01]);
@@ -1443,6 +2697,10 @@ document.getElementById("pauseBtn").addEventListener("click", () => {
 
 document.getElementById("resumeBtn").addEventListener("click", () => {
     if (!isRunning) {
+        if (!cFTMSControl) {
+            showStartupIndicator(lastSpeed);
+            return;
+        }
         haptic();
         if (pauseStartTimestamp) {
             totalPauseTime += (Date.now() - pauseStartTimestamp) / 1000;
@@ -1452,35 +2710,342 @@ document.getElementById("resumeBtn").addEventListener("click", () => {
         updateCumulativeStats();
         pendingResumeSpeed = lastSpeed;
         ftmsCmd([0x07]);
+        showStartupIndicator(lastSpeed);
     }
 });
 
 document.getElementById("speedDownBtn").addEventListener("click", () => {
     haptic(30);
-    lastSpeed = Math.max(1.0, Math.round((lastSpeed * 10 - 5)) / 10);
+    lastSpeed = Math.max(1.0, Math.round(lastSpeed * 10 - 5) / 10);
     ftmsCmd(ftmsSpeedBytes(lastSpeed));
 });
 
 document.getElementById("speedUpBtn").addEventListener("click", () => {
     haptic(30);
-    lastSpeed = Math.min(12.0, Math.round((lastSpeed * 10 + 5)) / 10);
+    lastSpeed = Math.min(12.0, Math.round(lastSpeed * 10 + 5) / 10);
     ftmsCmd(ftmsSpeedBytes(lastSpeed));
 });
 
 function startAndSetSpeed(targetSpeed) {
+    if (!isRunning && !cFTMSControl) {
+        showStartupIndicator(targetSpeed);
+        return;
+    }
     haptic(30);
     lastSpeed = targetSpeed;
     if (!isRunning) {
         pendingResumeSpeed = targetSpeed;
         ftmsCmd([0x07]);
+        showStartupIndicator(targetSpeed);
     } else {
         ftmsCmd(ftmsSpeedBytes(targetSpeed));
     }
 }
 
-document.getElementById("preset35Btn").addEventListener("click", () => startAndSetSpeed(3.5));
-document.getElementById("preset45Btn").addEventListener("click", () => startAndSetSpeed(4.5));
-document.getElementById("preset55Btn").addEventListener("click", () => startAndSetSpeed(5.5));
+// Settings tab switching
+document.querySelectorAll(".settings-tab-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+        const nextId = `settingsGroup-${btn.dataset.tab}`;
+        const current = document.querySelector('[id^="settingsGroup-"]:not(.hidden)');
+        const next = document.getElementById(nextId);
+        if (current === next) return;
+
+        // Update tab button active state immediately
+        document.querySelectorAll(".settings-tab-btn").forEach((b) => {
+            b.classList.remove("bg-sporty", "text-white");
+            b.classList.add("bg-gray-200", "dark:bg-gray-700", "text-gray-700", "dark:text-gray-300");
+        });
+        btn.classList.remove("bg-gray-200", "dark:bg-gray-700", "text-gray-700", "dark:text-gray-300");
+        btn.classList.add("bg-sporty", "text-white");
+
+        // Fade out current tab, swap invisibly, fade in next tab
+        current.style.opacity = "0";
+        setTimeout(() => {
+            current.classList.add("hidden");
+            current.style.opacity = "";
+            next.classList.remove("hidden");
+            next.style.opacity = "0";
+            requestAnimationFrame(() => requestAnimationFrame(() => {
+                next.style.opacity = "";
+            }));
+        }, 150);
+    });
+});
+
+// Speed presets — reset to defaults
+document.getElementById("speedResetDefaultsBtn").addEventListener("click", () => {
+    document.getElementById("speedResetConfirm").classList.remove("hidden");
+    document.getElementById("speedResetDefaultsBtn").classList.add("hidden");
+});
+document.getElementById("speedResetCancelBtn").addEventListener("click", () => {
+    document.getElementById("speedResetConfirm").classList.add("hidden");
+    document.getElementById("speedResetDefaultsBtn").classList.remove("hidden");
+});
+document.getElementById("speedResetConfirmBtn").addEventListener("click", () => {
+    DEFAULT_SPEED_PRESETS.forEach((v, i) => {
+        const el = document.getElementById(`speedPreset${i}`);
+        if (el) el.value = v;
+    });
+    localStorage.setItem("wp_speed_presets", JSON.stringify(DEFAULT_SPEED_PRESETS));
+    applySpeedPresets(DEFAULT_SPEED_PRESETS);
+    document.getElementById("speedResetConfirm").classList.add("hidden");
+    document.getElementById("speedResetDefaultsBtn").classList.remove("hidden");
+});
+
+// Integrations — clear webhook settings
+function showClearConfirm() {
+    document.getElementById("integrationsClearConfirm").classList.remove("hidden");
+    document.getElementById("integrationsClearConfirm").classList.add("flex");
+    document.getElementById("integrationsClearBtn").classList.add("hidden");
+}
+function hideClearConfirm() {
+    document.getElementById("integrationsClearConfirm").classList.add("hidden");
+    document.getElementById("integrationsClearConfirm").classList.remove("flex");
+    document.getElementById("integrationsClearBtn").classList.remove("hidden");
+}
+document.getElementById("integrationsClearBtn").addEventListener("click", showClearConfirm);
+document.getElementById("integrationsClearCancelBtn").addEventListener("click", hideClearConfirm);
+document.getElementById("integrationsClearConfirmBtn").addEventListener("click", () => {
+    webhookUrl = "";
+    webhookSecret = "";
+    document.getElementById("webhookUrlInput").value = "";
+    document.getElementById("webhookSecretInput").value = "";
+    localStorage.removeItem("wp_webhook_url");
+    localStorage.removeItem("wp_webhook_secret");
+    hideClearConfirm();
+});
+
+// ============================================================
+// Integrations — example script generator
+// ============================================================
+const WEBHOOK_FIELDS = [
+    { id: "wf-distance", key: "distance",   label: "distance (km)",   expr: "s.distance" },
+    { id: "wf-calories", key: "calories",   label: "calories",        expr: "s.calories" },
+    { id: "wf-time",     key: "timeSeconds",label: "timeSeconds",     expr: "s.timeSeconds" },
+    { id: "wf-avgSpeed", key: "avgSpeed",   label: "avgSpeed (km/h)", expr: "parseFloat(s.avgSpeed.toFixed(2))" },
+    { id: "wf-maxSpeed", key: "maxSpeed",   label: "maxSpeed (km/h)", expr: "parseFloat(s.maxSpeed.toFixed(1))" },
+    { id: "wf-steps",    key: "steps",      label: "steps",           expr: "s.steps" },
+    { id: "wf-pace",     key: "pace",       label: "pace (min/km)",   expr: "s.pace" },
+    { id: "wf-pauses",   key: "pauseCount", label: "pauseCount",      expr: "s.pauseCount" },
+];
+
+const PAYLOAD_REFERENCE = `{
+  "secret":     "string  — shared secret you configured",
+  "exportedAt": "string  — ISO 8601 timestamp of the export",
+
+  "session": {
+    "distance":    number,  // km, this session
+    "calories":    number,
+    "timeSeconds": number,  // active walk time (excludes pauses)
+    "maxSpeed":    number,  // km/h
+    "avgSpeed":    number,  // km/h (0 if no movement)
+    "pace":        number,  // min/km (0 if speed ≤ 0)
+    "steps":       number,  // estimated from height
+    "pauseCount":  number
+  },
+
+  "cumulative": {
+    "distance":         number,  // all-time totals
+    "calories":         number,
+    "timeSeconds":      number,
+    "maxSpeed":         number,
+    "avgSpeed":         number,
+    "pace":             number,
+    "steps":            number,
+    "pauseCount":       number,
+    "pauseTimeSeconds": number   // total time spent paused (all-time)
+  },
+
+  "sessions": [   // full history — one object per saved session
+    {
+      "date":         "YYYY-MM-DD",
+      "savedAt":      "ISO 8601",
+      "sessionStart": "ISO 8601",
+      "distance":     number,
+      "calories":     number,
+      "timeSeconds":  number,
+      "speedSum":     number,
+      "speedSamples": number,
+      "maxSpeed":     number,
+      "pauses":       number,
+      "steps":        number
+    }
+  ]
+}`;
+
+function getSelectedFields() {
+    return WEBHOOK_FIELDS.filter(f => document.getElementById(f.id).checked);
+}
+
+function buildGasSnippet(fields) {
+    if (fields.length === 0) return "// Select at least one field above to generate a script.";
+    const secret = webhookSecret || "your-secret";
+    const headers = ["Date", ...fields.map(f => f.label), "Exported At"];
+    const rowValues = ["  data.exportedAt.slice(0, 10),", ...fields.map(f => `  ${f.expr},`), "  data.exportedAt,"];
+    return `// 1. In Google Apps Script, create a new project and paste this code.
+// 2. Deploy > New deployment > Web app
+//    Execute as: Me  |  Who has access: Anyone
+// 3. Copy the Web App URL into the Webhook URL field above.
+// 4. Re-deploy (new version) after any code change.
+
+const SHEET_NAME = "Sessions"; // change to match your sheet
+const SECRET     = "${secret}";
+
+function doPost(e) {
+  try {
+    const data = JSON.parse(e.postData.contents);
+
+    if (data.secret !== SECRET) {
+      return respond({ error: "forbidden" });
+    }
+
+    const ss    = SpreadsheetApp.getActiveSpreadsheet();
+    const sheet = ss.getSheetByName(SHEET_NAME) || ss.insertSheet(SHEET_NAME);
+
+    if (sheet.getLastRow() === 0) {
+      sheet.appendRow(${JSON.stringify(headers)});
+    }
+
+    const s = data.session;
+    sheet.appendRow([
+${rowValues.join("\n")}
+    ]);
+
+    return respond({ ok: true });
+  } catch (err) {
+    return respond({ error: err.message });
+  }
+}
+
+function respond(obj) {
+  return ContentService
+    .createTextOutput(JSON.stringify(obj))
+    .setMimeType(ContentService.MimeType.JSON);
+}`;
+}
+
+function buildZapierSnippet(fields) {
+    if (fields.length === 0) return "// Select at least one field above to generate a script.";
+    const secret = webhookSecret || "your-secret";
+    // Build input-data mapping comment lines and access lines
+    const mappingLines = [
+        "//   secret      = {{Secret}}",
+        "//   exportedAt  = {{Exported At}}",
+        ...fields.map(f => `//   ${f.key.padEnd(11)} = {{Session ${f.key.charAt(0).toUpperCase() + f.key.slice(1)}}}`),
+    ];
+    const outputLines = [
+        "  date:       inputData.exportedAt?.slice(0, 10),",
+        "  exportedAt: inputData.exportedAt,",
+        ...fields.map(f => `  ${f.key.padEnd(11)}: inputData.${f.key},  // ${f.label}`),
+    ];
+    return `// Zap setup:
+// Trigger : Webhooks by Zapier > Catch Hook
+//           (paste the hook URL into the Webhook URL field above)
+//
+// The body is JSON — Zapier exposes every field directly in the UI.
+// For most actions (Google Sheets, Notion, etc.) no Code step is needed:
+//   just map {{Session Distance}}, {{Session Calories}}, etc. in the action.
+//
+// If you do need a Code by Zapier step, add these Input Data mappings
+// in the step configuration, then use inputData below:
+${mappingLines.join("\n")}
+
+const SECRET = "${secret}";
+
+if (inputData.secret !== SECRET) {
+  throw new Error("Secret mismatch — request rejected");
+}
+
+output = {
+${outputLines.join("\n")}
+};`;
+}
+
+function buildN8nSnippet(fields) {
+    if (fields.length === 0) return "// Select at least one field above to generate a script.";
+    const secret = webhookSecret || "your-secret";
+    const outputLines = [
+        '    date:       data.exportedAt.slice(0, 10),',
+        '    exportedAt: data.exportedAt,',
+        ...fields.map(f => `    ${f.key.padEnd(11)}: s.${f.key},  // ${f.label}`),
+    ];
+    return `// Workflow setup:
+// Node 1: Webhook  — HTTP Method: POST, Response Mode: Last Node
+//         (paste the Production URL into the Webhook URL field above)
+// Node 2: Code     — paste this JavaScript (Mode: Run Once for Each Item)
+//
+// Fields are also accessible directly in expressions without a Code node:
+//   {{ $json.session.distance }},  {{ $json.session.calories }}, etc.
+
+const SECRET = "${secret}";
+
+const data  = $input.first().json;
+const s     = data.session;
+
+if (data.secret !== SECRET) {
+  throw new Error("Secret mismatch — request rejected");
+}
+
+return [{
+  json: {
+${outputLines.join("\n")}
+  }
+}];`;
+}
+
+function saveWebhookFieldSelection() {
+    const state = {};
+    WEBHOOK_FIELDS.forEach(f => { state[f.id] = document.getElementById(f.id).checked; });
+    localStorage.setItem("wp_webhook_fields", JSON.stringify(state));
+}
+
+// Restore persisted field selection.
+// Stored as an object {id: bool} so new fields fall back to the HTML default (checked)
+// when not present in a prior save. Old array format is ignored (one-time reset to defaults).
+(function restoreWebhookFields() {
+    try {
+        const saved = JSON.parse(localStorage.getItem("wp_webhook_fields") || "null");
+        if (saved && typeof saved === "object" && !Array.isArray(saved)) {
+            WEBHOOK_FIELDS.forEach(f => {
+                if (f.id in saved) document.getElementById(f.id).checked = saved[f.id];
+                // else: not in saved → keep HTML default (checked)
+            });
+        }
+    } catch (_) {}
+})();
+
+// Persist selection on change
+WEBHOOK_FIELDS.forEach(f => {
+    document.getElementById(f.id).addEventListener("change", saveWebhookFieldSelection);
+});
+
+// Copy buttons — generate script at click time from current field selection
+async function copyWithFeedback(btn, text) {
+    try {
+        await navigator.clipboard.writeText(text);
+        const orig = btn.innerHTML;
+        btn.innerHTML = '<i class="fas fa-check"></i> Copied!';
+        setTimeout(() => { btn.innerHTML = orig; }, 2000);
+    } catch (err) {
+        console.warn("Clipboard write failed:", err);
+    }
+}
+
+document.getElementById("copy-payload").addEventListener("click", function () {
+    copyWithFeedback(this, PAYLOAD_REFERENCE);
+});
+document.getElementById("copy-gas").addEventListener("click", function () {
+    const fields = getSelectedFields();
+    copyWithFeedback(this, fields.length ? buildGasSnippet(fields) : "// Select at least one field above.");
+});
+document.getElementById("copy-zapier").addEventListener("click", function () {
+    const fields = getSelectedFields();
+    copyWithFeedback(this, fields.length ? buildZapierSnippet(fields) : "// Select at least one field above.");
+});
+document.getElementById("copy-n8n").addEventListener("click", function () {
+    const fields = getSelectedFields();
+    copyWithFeedback(this, fields.length ? buildN8nSnippet(fields) : "// Select at least one field above.");
+});
 
 document.getElementById("exportBtn").addEventListener("click", exportStats);
 
@@ -1495,6 +3060,9 @@ document.getElementById("settingsBtn").addEventListener("click", () => {
 
 document.getElementById("closeSettingsBtn").addEventListener("click", () => {
     document.getElementById("settingsModal").classList.add("hidden");
+    document.getElementById("speedResetConfirm").classList.add("hidden");
+    document.getElementById("speedResetDefaultsBtn").classList.remove("hidden");
+    hideClearConfirm();
 });
 
 document.getElementById("goalsBtn").addEventListener("click", () => {
@@ -1505,33 +3073,64 @@ document.getElementById("closeGoalsBtn").addEventListener("click", () => {
     document.getElementById("goalsModal").classList.add("hidden");
 });
 
-document.querySelectorAll(".trend-tab-btn").forEach(btn => {
+document.querySelectorAll(".trend-tab-btn").forEach((btn) => {
     btn.addEventListener("click", function () {
-        document.querySelectorAll(".trend-tab-btn").forEach(b => {
+        document.querySelectorAll(".trend-tab-btn").forEach((b) => {
             b.classList.remove("bg-sporty", "text-white");
-            b.classList.add("bg-gray-200", "dark:bg-gray-700", "text-gray-700", "dark:text-gray-300");
+            b.classList.add(
+                "bg-gray-200",
+                "dark:bg-gray-700",
+                "text-gray-700",
+                "dark:text-gray-300",
+            );
         });
         this.classList.add("bg-sporty", "text-white");
-        this.classList.remove("bg-gray-200", "dark:bg-gray-700", "text-gray-700", "dark:text-gray-300");
+        this.classList.remove(
+            "bg-gray-200",
+            "dark:bg-gray-700",
+            "text-gray-700",
+            "dark:text-gray-300",
+        );
         // Use inline style so mobile tabs don't conflict with desktop md:block classes
-        ["distance", "calories", "speed"].forEach(c => {
+        ["distance", "calories", "speed"].forEach((c) => {
             document.getElementById("trendChartWrap-" + c).style.display =
                 c !== this.dataset.chart ? "none" : "";
         });
-        const map = { distance: wpCharts.distance, calories: wpCharts.calories, speed: wpCharts.speedHist };
+        const map = {
+            distance: wpCharts.distance,
+            calories: wpCharts.calories,
+            speed: wpCharts.speedHist,
+        };
         if (map[this.dataset.chart]) map[this.dataset.chart].resize();
     });
 });
 
-document.querySelectorAll(".goal-tab-btn").forEach(btn => {
+document.querySelectorAll(".goal-tab-btn").forEach((btn) => {
     btn.addEventListener("click", function () {
-        document.querySelectorAll(".goal-tab-btn").forEach(b => {
+        document.querySelectorAll(".goal-tab-btn").forEach((b) => {
             b.classList.remove("bg-sporty", "text-white");
-            b.classList.add("bg-gray-200", "dark:bg-gray-700", "text-gray-700", "dark:text-gray-300");
+            b.classList.add(
+                "bg-gray-200",
+                "dark:bg-gray-700",
+                "text-gray-700",
+                "dark:text-gray-300",
+            );
         });
         this.classList.add("bg-sporty", "text-white");
-        this.classList.remove("bg-gray-200", "dark:bg-gray-700", "text-gray-700", "dark:text-gray-300");
-        ["daily", "weekly", "monthly", "threemonth", "sixmonth", "yearly"].forEach(tab => {
+        this.classList.remove(
+            "bg-gray-200",
+            "dark:bg-gray-700",
+            "text-gray-700",
+            "dark:text-gray-300",
+        );
+        [
+            "daily",
+            "weekly",
+            "monthly",
+            "threemonth",
+            "sixmonth",
+            "yearly",
+        ].forEach((tab) => {
             const el = document.getElementById("goalGroup-" + tab);
             if (tab === this.dataset.tab) {
                 el.classList.remove("hidden");
@@ -1544,144 +3143,365 @@ document.querySelectorAll(".goal-tab-btn").forEach(btn => {
     });
 });
 
-["settingsModal", "goalsModal", "continueModal", "recoverModal", "clearConfirmModal"].forEach(id => {
+[
+    "settingsModal",
+    "goalsModal",
+    "continueModal",
+    "recoverModal",
+    "clearConfirmModal",
+].forEach((id) => {
     document.getElementById(id).addEventListener("click", function (e) {
         if (e.target === this) this.classList.add("hidden");
     });
 });
 
-document.getElementById("copyForSheetsBtn").addEventListener("click", copyForSheets);
+document
+    .getElementById("copyForSheetsBtn")
+    .addEventListener("click", copyForSheets);
 
-document.getElementById("goalDistanceSlider").addEventListener("input", function() {
-    const val = parseFloat(this.value);
-    goalDistanceKm = val;
-    localStorage.setItem("wp_goal_distance", val);
-    document.getElementById("goalDistanceDisplay").textContent = val > 0 ? val.toFixed(1) : "—";
-    updateGoalProgress();
-});
+document
+    .getElementById("goalActiveDaysSlider")
+    .addEventListener("input", function () {
+        goalActiveDays = parseInt(this.value);
+        localStorage.setItem("wp_goal_active_days", goalActiveDays);
+        document.getElementById("goalActiveDaysDisplay").textContent =
+            goalActiveDays;
+        recalculateGoals();
+    });
 
-document.getElementById("goalTimeSlider").addEventListener("input", function() {
-    const mins = parseInt(this.value);
-    goalTimeSeconds = mins * 60;
-    localStorage.setItem("wp_goal_time_seconds", goalTimeSeconds);
-    document.getElementById("goalTimeDisplay").textContent = mins > 0 ? mins + ":00" : "—";
-    updateGoalProgress();
-});
+document
+    .getElementById("goalDistanceSlider")
+    .addEventListener("input", function () {
+        const val = parseFloat(this.value);
+        goalDistanceKm = val;
+        localStorage.setItem("wp_goal_distance", val);
+        document.getElementById("goalDistanceDisplay").textContent =
+            val > 0 ? val.toFixed(1) : "—";
+        recalculateGoals();
+    });
 
-document.getElementById("goalWeekDistanceSlider").addEventListener("input", function() {
-    const val = parseFloat(this.value);
-    goalWeekDistanceKm = val;
-    localStorage.setItem("wp_goal_week_distance", val);
-    document.getElementById("goalWeekDistanceDisplay").textContent = val > 0 ? val.toFixed(1) : "—";
-    updateGoalProgress();
-});
+document
+    .getElementById("goalTimeSlider")
+    .addEventListener("input", function () {
+        const mins = parseInt(this.value);
+        goalTimeSeconds = mins * 60;
+        localStorage.setItem("wp_goal_time_seconds", goalTimeSeconds);
+        document.getElementById("goalTimeDisplay").textContent =
+            mins > 0 ? mins + ":00" : "—";
+        recalculateGoals();
+    });
 
-document.getElementById("goalWeekTimeSlider").addEventListener("input", function() {
-    const mins = parseInt(this.value);
-    goalWeekTimeSeconds = mins * 60;
-    localStorage.setItem("wp_goal_week_time_seconds", goalWeekTimeSeconds);
-    document.getElementById("goalWeekTimeDisplay").textContent = mins > 0 ? formatHHMM(goalWeekTimeSeconds) : "—";
-    updateGoalProgress();
-});
+document
+    .getElementById("goalWeekDistanceSlider")
+    .addEventListener("input", function () {
+        autoWeek = false;
+        localStorage.setItem("wp_goal_auto_week", false);
+        syncAutoUI();
+        const val = parseFloat(this.value);
+        goalWeekDistanceKm = val;
+        localStorage.setItem("wp_goal_week_distance", val);
+        document.getElementById("goalWeekDistanceDisplay").textContent =
+            val > 0 ? val.toFixed(1) : "—";
+        updateGoalProgress();
+    });
 
-document.getElementById("goalMonthDistanceSlider").addEventListener("input", function() {
-    const val = parseFloat(this.value);
-    goalMonthDistanceKm = val;
-    localStorage.setItem("wp_goal_month_distance", val);
-    document.getElementById("goalMonthDistanceDisplay").textContent = val > 0 ? val.toFixed(1) : "—";
-    updateGoalProgress();
-});
+document
+    .getElementById("goalWeekTimeSlider")
+    .addEventListener("input", function () {
+        autoWeek = false;
+        localStorage.setItem("wp_goal_auto_week", false);
+        syncAutoUI();
+        const mins = parseInt(this.value);
+        goalWeekTimeSeconds = mins * 60;
+        localStorage.setItem("wp_goal_week_time_seconds", goalWeekTimeSeconds);
+        document.getElementById("goalWeekTimeDisplay").textContent =
+            mins > 0 ? formatHHMM(goalWeekTimeSeconds) : "—";
+        updateGoalProgress();
+    });
 
-document.getElementById("goalMonthTimeSlider").addEventListener("input", function() {
-    const mins = parseInt(this.value);
-    goalMonthTimeSeconds = mins * 60;
-    localStorage.setItem("wp_goal_month_time_seconds", goalMonthTimeSeconds);
-    document.getElementById("goalMonthTimeDisplay").textContent = mins > 0 ? formatHHMM(goalMonthTimeSeconds) : "—";
-    updateGoalProgress();
-});
+document
+    .getElementById("goalWeekSessionsSlider")
+    .addEventListener("input", function () {
+        autoWeek = false;
+        localStorage.setItem("wp_goal_auto_week", false);
+        syncAutoUI();
+        goalWeekSessions = parseInt(this.value);
+        localStorage.setItem("wp_goal_week_sessions", goalWeekSessions);
+        document.getElementById("goalWeekSessionsDisplay").textContent =
+            goalWeekSessions;
+        updateGoalProgress();
+    });
 
-document.getElementById("goalThreeMonthDistanceSlider").addEventListener("input", function() {
-    const val = parseFloat(this.value);
-    goalThreeMonthDistanceKm = val;
-    localStorage.setItem("wp_goal_threemonth_distance", val);
-    document.getElementById("goalThreeMonthDistanceDisplay").textContent = val > 0 ? val.toFixed(1) : "—";
-    updateGoalProgress();
-});
+document
+    .getElementById("goalMonthDistanceSlider")
+    .addEventListener("input", function () {
+        autoMonth = false;
+        localStorage.setItem("wp_goal_auto_month", false);
+        syncAutoUI();
+        const val = parseFloat(this.value);
+        goalMonthDistanceKm = val;
+        localStorage.setItem("wp_goal_month_distance", val);
+        document.getElementById("goalMonthDistanceDisplay").textContent =
+            val > 0 ? val.toFixed(1) : "—";
+        updateGoalProgress();
+    });
 
-document.getElementById("goalThreeMonthTimeSlider").addEventListener("input", function() {
-    const mins = parseInt(this.value);
-    goalThreeMonthTimeSeconds = mins * 60;
-    localStorage.setItem("wp_goal_threemonth_time_seconds", goalThreeMonthTimeSeconds);
-    document.getElementById("goalThreeMonthTimeDisplay").textContent = mins > 0 ? formatHHMM(goalThreeMonthTimeSeconds) : "—";
-    updateGoalProgress();
-});
+document
+    .getElementById("goalMonthTimeSlider")
+    .addEventListener("input", function () {
+        autoMonth = false;
+        localStorage.setItem("wp_goal_auto_month", false);
+        syncAutoUI();
+        const mins = parseInt(this.value);
+        goalMonthTimeSeconds = mins * 60;
+        localStorage.setItem(
+            "wp_goal_month_time_seconds",
+            goalMonthTimeSeconds,
+        );
+        document.getElementById("goalMonthTimeDisplay").textContent =
+            mins > 0 ? formatHHMM(goalMonthTimeSeconds) : "—";
+        updateGoalProgress();
+    });
 
-document.getElementById("goalSixMonthDistanceSlider").addEventListener("input", function() {
-    const val = parseFloat(this.value);
-    goalSixMonthDistanceKm = val;
-    localStorage.setItem("wp_goal_sixmonth_distance", val);
-    document.getElementById("goalSixMonthDistanceDisplay").textContent = val > 0 ? val.toFixed(1) : "—";
-    updateGoalProgress();
-});
+document
+    .getElementById("goalDaySessionsSlider")
+    .addEventListener("input", function () {
+        goalDaySessions = parseInt(this.value);
+        localStorage.setItem("wp_goal_day_sessions", goalDaySessions);
+        document.getElementById("goalDaySessionsDisplay").textContent =
+            goalDaySessions;
+        updateGoalProgress();
+    });
 
-document.getElementById("goalSixMonthTimeSlider").addEventListener("input", function() {
-    const mins = parseInt(this.value);
-    goalSixMonthTimeSeconds = mins * 60;
-    localStorage.setItem("wp_goal_sixmonth_time_seconds", goalSixMonthTimeSeconds);
-    document.getElementById("goalSixMonthTimeDisplay").textContent = mins > 0 ? formatHHMM(goalSixMonthTimeSeconds) : "—";
-    updateGoalProgress();
-});
+document
+    .getElementById("goalMonthSessionsSlider")
+    .addEventListener("input", function () {
+        autoMonth = false;
+        localStorage.setItem("wp_goal_auto_month", false);
+        syncAutoUI();
+        goalMonthSessions = parseInt(this.value);
+        localStorage.setItem("wp_goal_month_sessions", goalMonthSessions);
+        document.getElementById("goalMonthSessionsDisplay").textContent =
+            goalMonthSessions;
+        updateGoalProgress();
+    });
 
-document.getElementById("goalYearDistanceSlider").addEventListener("input", function() {
-    const val = parseFloat(this.value);
-    goalYearDistanceKm = val;
-    localStorage.setItem("wp_goal_year_distance", val);
-    document.getElementById("goalYearDistanceDisplay").textContent = val > 0 ? val.toFixed(0) : "—";
-    updateGoalProgress();
-});
+document
+    .getElementById("goalThreeMonthDistanceSlider")
+    .addEventListener("input", function () {
+        autoThreeMonth = false;
+        localStorage.setItem("wp_goal_auto_threemonth", false);
+        syncAutoUI();
+        const val = parseFloat(this.value);
+        goalThreeMonthDistanceKm = val;
+        localStorage.setItem("wp_goal_threemonth_distance", val);
+        document.getElementById("goalThreeMonthDistanceDisplay").textContent =
+            val > 0 ? val.toFixed(1) : "—";
+        updateGoalProgress();
+    });
 
-document.getElementById("goalYearTimeSlider").addEventListener("input", function() {
-    const mins = parseInt(this.value);
-    goalYearTimeSeconds = mins * 60;
-    localStorage.setItem("wp_goal_year_time_seconds", goalYearTimeSeconds);
-    document.getElementById("goalYearTimeDisplay").textContent = mins > 0 ? formatHHMM(goalYearTimeSeconds) : "—";
-    updateGoalProgress();
-});
+document
+    .getElementById("goalThreeMonthTimeSlider")
+    .addEventListener("input", function () {
+        autoThreeMonth = false;
+        localStorage.setItem("wp_goal_auto_threemonth", false);
+        syncAutoUI();
+        const mins = parseInt(this.value);
+        goalThreeMonthTimeSeconds = mins * 60;
+        localStorage.setItem(
+            "wp_goal_threemonth_time_seconds",
+            goalThreeMonthTimeSeconds,
+        );
+        document.getElementById("goalThreeMonthTimeDisplay").textContent =
+            mins > 0 ? formatHHMM(goalThreeMonthTimeSeconds) : "—";
+        updateGoalProgress();
+    });
 
-document.querySelectorAll(".live-window-btn").forEach(btn => {
-    btn.addEventListener("click", () => {
-        liveChartMax = parseInt(btn.dataset.window);
-        while (liveSpeedData.length > liveChartMax) { liveSpeedData.shift(); liveSpeedLabels.shift(); }
-        document.querySelectorAll(".live-window-btn").forEach(b => {
-            b.className = b.className.replace("bg-sporty text-white", "bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300");
-        });
-        btn.className = btn.className.replace("bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300", "bg-sporty text-white");
-        btn.className = btn.className.replace("hover:bg-sporty hover:text-white", "");
+document
+    .getElementById("goalSixMonthDistanceSlider")
+    .addEventListener("input", function () {
+        autoSixMonth = false;
+        localStorage.setItem("wp_goal_auto_sixmonth", false);
+        syncAutoUI();
+        const val = parseFloat(this.value);
+        goalSixMonthDistanceKm = val;
+        localStorage.setItem("wp_goal_sixmonth_distance", val);
+        document.getElementById("goalSixMonthDistanceDisplay").textContent =
+            val > 0 ? val.toFixed(1) : "—";
+        updateGoalProgress();
+    });
+
+document
+    .getElementById("goalSixMonthTimeSlider")
+    .addEventListener("input", function () {
+        autoSixMonth = false;
+        localStorage.setItem("wp_goal_auto_sixmonth", false);
+        syncAutoUI();
+        const mins = parseInt(this.value);
+        goalSixMonthTimeSeconds = mins * 60;
+        localStorage.setItem(
+            "wp_goal_sixmonth_time_seconds",
+            goalSixMonthTimeSeconds,
+        );
+        document.getElementById("goalSixMonthTimeDisplay").textContent =
+            mins > 0 ? formatHHMM(goalSixMonthTimeSeconds) : "—";
+        updateGoalProgress();
+    });
+
+document
+    .getElementById("goalYearDistanceSlider")
+    .addEventListener("input", function () {
+        autoYear = false;
+        localStorage.setItem("wp_goal_auto_year", false);
+        syncAutoUI();
+        const val = parseFloat(this.value);
+        goalYearDistanceKm = val;
+        localStorage.setItem("wp_goal_year_distance", val);
+        document.getElementById("goalYearDistanceDisplay").textContent =
+            val > 0 ? val.toFixed(0) : "—";
+        updateGoalProgress();
+    });
+
+document
+    .getElementById("goalYearTimeSlider")
+    .addEventListener("input", function () {
+        autoYear = false;
+        localStorage.setItem("wp_goal_auto_year", false);
+        syncAutoUI();
+        const mins = parseInt(this.value);
+        goalYearTimeSeconds = mins * 60;
+        localStorage.setItem("wp_goal_year_time_seconds", goalYearTimeSeconds);
+        document.getElementById("goalYearTimeDisplay").textContent =
+            mins > 0 ? formatHHMM(goalYearTimeSeconds) : "—";
+        updateGoalProgress();
+    });
+
+// Per-period auto checkbox listeners
+[
+    [
+        "goalAutoWeek",
+        "wp_goal_auto_week",
+        (v) => {
+            autoWeek = v;
+        },
+    ],
+    [
+        "goalAutoMonth",
+        "wp_goal_auto_month",
+        (v) => {
+            autoMonth = v;
+        },
+    ],
+    [
+        "goalAutoThreeMonth",
+        "wp_goal_auto_threemonth",
+        (v) => {
+            autoThreeMonth = v;
+        },
+    ],
+    [
+        "goalAutoSixMonth",
+        "wp_goal_auto_sixmonth",
+        (v) => {
+            autoSixMonth = v;
+        },
+    ],
+    [
+        "goalAutoYear",
+        "wp_goal_auto_year",
+        (v) => {
+            autoYear = v;
+        },
+    ],
+].forEach(([id, storageKey, setFn]) => {
+    document.getElementById(id).addEventListener("change", function () {
+        setFn(this.checked);
+        localStorage.setItem(storageKey, this.checked);
+        syncAutoUI();
+        if (this.checked) recalculateGoals();
     });
 });
 
-document.querySelectorAll(".live-ymax-btn").forEach(btn => {
+document.getElementById("goalResetAllAuto").addEventListener("click", () => {
+    autoWeek = autoMonth = autoThreeMonth = autoSixMonth = autoYear = true;
+    [
+        "wp_goal_auto_week",
+        "wp_goal_auto_month",
+        "wp_goal_auto_threemonth",
+        "wp_goal_auto_sixmonth",
+        "wp_goal_auto_year",
+    ].forEach((k) => localStorage.setItem(k, true));
+    syncAutoUI();
+    recalculateGoals();
+});
+
+document.querySelectorAll(".live-window-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+        liveChartMax = parseInt(btn.dataset.window);
+        while (liveSpeedData.length > liveChartMax) {
+            liveSpeedData.shift();
+            liveSpeedLabels.shift();
+        }
+        document.querySelectorAll(".live-window-btn").forEach((b) => {
+            b.classList.remove("bg-sporty", "text-white");
+            b.classList.add(
+                "bg-gray-200",
+                "dark:bg-gray-700",
+                "text-gray-700",
+                "dark:text-gray-300",
+            );
+        });
+        btn.classList.remove(
+            "bg-gray-200",
+            "dark:bg-gray-700",
+            "text-gray-700",
+            "dark:text-gray-300",
+            "hover:bg-sporty",
+            "hover:text-white",
+        );
+        btn.classList.add("bg-sporty", "text-white");
+    });
+});
+
+document.querySelectorAll(".live-ymax-btn").forEach((btn) => {
     btn.addEventListener("click", () => {
         liveChartYMax = parseInt(btn.dataset.ymax);
         if (wpCharts.liveSpeed) {
             const yScale = wpCharts.liveSpeed.options.scales.y;
-            if (liveChartYMax > 0) { yScale.max = liveChartYMax; } else { delete yScale.max; }
+            if (liveChartYMax > 0) {
+                yScale.max = liveChartYMax;
+            } else {
+                delete yScale.max;
+            }
             wpCharts.liveSpeed.update();
         }
-        document.querySelectorAll(".live-ymax-btn").forEach(b => {
-            b.className = b.className.replace("bg-sporty text-white", "bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300");
+        document.querySelectorAll(".live-ymax-btn").forEach((b) => {
+            b.classList.remove("bg-sporty", "text-white");
+            b.classList.add(
+                "bg-gray-200",
+                "dark:bg-gray-700",
+                "text-gray-700",
+                "dark:text-gray-300",
+            );
         });
-        btn.className = btn.className.replace("bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300", "bg-sporty text-white");
-        btn.className = btn.className.replace("hover:bg-sporty hover:text-white", "");
+        btn.classList.remove(
+            "bg-gray-200",
+            "dark:bg-gray-700",
+            "text-gray-700",
+            "dark:text-gray-300",
+            "hover:bg-sporty",
+            "hover:text-white",
+        );
+        btn.classList.add("bg-sporty", "text-white");
     });
 });
 
 // --- Recovery Modal ---
-let pendingMergeFn   = null;
+let pendingMergeFn = null;
 let pendingReplaceFn = null;
 
 function closeRecoverModal() {
-    pendingMergeFn   = null;
+    pendingMergeFn = null;
     pendingReplaceFn = null;
     const modal = document.getElementById("recoverModal");
     modal.classList.add("hidden");
@@ -1689,46 +3509,140 @@ function closeRecoverModal() {
 }
 
 function showRecoverModal(snapshot, title, onMerge, onReplace) {
-    const avgSpeed = snapshot.speedSamples > 0
-        ? (snapshot.speedSum / snapshot.speedSamples).toFixed(2) : "0.00";
-    document.getElementById("recoverModalTitle").textContent    = title;
-    document.getElementById("recoverModalSavedAt").textContent  = "Saved: " + snapshot.savedAt;
-    document.getElementById("recoverModalDistance").textContent = snapshot.cumDistance.toFixed(2) + " km";
-    document.getElementById("recoverModalCalories").textContent = snapshot.cumCalories.toFixed(1) + " kcal";
-    document.getElementById("recoverModalTime").textContent     =
-        new Date(snapshot.cumTimeSeconds * 1000).toISOString().slice(11, 19);
-    document.getElementById("recoverModalMaxSpeed").textContent = snapshot.maxSpeed.toFixed(1) + " km/h";
-    document.getElementById("recoverModalAvgSpeed").textContent = avgSpeed + " km/h";
-    pendingMergeFn   = onMerge;
+    const avgSpeed =
+        snapshot.speedSamples > 0
+            ? (snapshot.speedSum / snapshot.speedSamples).toFixed(2)
+            : "0.00";
+    document.getElementById("recoverModalTitle").textContent = title;
+    document.getElementById("recoverModalSavedAt").textContent =
+        "Saved: " + snapshot.savedAt;
+    document.getElementById("recoverModalDistance").textContent =
+        snapshot.cumDistance.toFixed(2) + " km";
+    document.getElementById("recoverModalCalories").textContent =
+        snapshot.cumCalories.toFixed(1) + " kcal";
+    document.getElementById("recoverModalTime").textContent = new Date(
+        snapshot.cumTimeSeconds * 1000,
+    )
+        .toISOString()
+        .slice(11, 19);
+    document.getElementById("recoverModalMaxSpeed").textContent =
+        snapshot.maxSpeed.toFixed(1) + " km/h";
+    document.getElementById("recoverModalAvgSpeed").textContent =
+        avgSpeed + " km/h";
+    pendingMergeFn = onMerge;
     pendingReplaceFn = onReplace;
     const modal = document.getElementById("recoverModal");
     modal.classList.remove("hidden");
     modal.classList.add("flex");
 }
 
-document.getElementById("recoverModalMergeBtn").addEventListener("click", () => {
-    if (pendingMergeFn) pendingMergeFn();
-    closeRecoverModal();
-});
+document
+    .getElementById("recoverModalMergeBtn")
+    .addEventListener("click", () => {
+        if (pendingMergeFn) pendingMergeFn();
+        closeRecoverModal();
+    });
 
-document.getElementById("recoverModalReplaceBtn").addEventListener("click", () => {
-    if (pendingReplaceFn) pendingReplaceFn();
-    closeRecoverModal();
-});
+document
+    .getElementById("recoverModalReplaceBtn")
+    .addEventListener("click", () => {
+        if (pendingReplaceFn) pendingReplaceFn();
+        closeRecoverModal();
+    });
 
-document.getElementById("recoverModalCancelBtn").addEventListener("click", closeRecoverModal);
+document
+    .getElementById("recoverModalCancelBtn")
+    .addEventListener("click", closeRecoverModal);
 
 document.getElementById("recoverSessionBtn").addEventListener("click", () => {
-    const snapshot = JSON.parse(localStorage.getItem("wp_session_backup") || "null");
+    const snapshot = JSON.parse(
+        localStorage.getItem("wp_session_backup") || "null",
+    );
     if (!snapshot) return;
-    showRecoverModal(snapshot, "Recover Session", recoverSession, recoverFromSnapshot.bind(null, snapshot));
+    showRecoverModal(
+        snapshot,
+        "Recover Session",
+        recoverSession,
+        recoverFromSnapshot.bind(null, snapshot),
+    );
 });
 
 document.getElementById("recoverExportBtn").addEventListener("click", () => {
-    const snapshot = JSON.parse(localStorage.getItem("wp_export_snapshot") || "null");
+    const snapshot = JSON.parse(
+        localStorage.getItem("wp_export_snapshot") || "null",
+    );
     if (!snapshot) return;
-    showRecoverModal(snapshot, "Restore from Last Export", mergeFromSnapshot.bind(null, snapshot), recoverFromExport);
+    showRecoverModal(
+        snapshot,
+        "Restore from Last Export",
+        mergeFromSnapshot.bind(null, snapshot),
+        recoverFromExport,
+    );
 });
+
+document.getElementById("historyViewDayBtn").addEventListener("click", () => {
+    historyView = "day";
+    document
+        .getElementById("historyViewDayBtn")
+        .classList.add("bg-sporty", "text-white");
+    document
+        .getElementById("historyViewDayBtn")
+        .classList.remove(
+            "bg-gray-200",
+            "dark:bg-gray-700",
+            "text-gray-700",
+            "dark:text-gray-300",
+            "hover:bg-sporty",
+            "hover:text-white",
+        );
+    document
+        .getElementById("historyViewSessionBtn")
+        .classList.remove("bg-sporty", "text-white");
+    document
+        .getElementById("historyViewSessionBtn")
+        .classList.add(
+            "bg-gray-200",
+            "dark:bg-gray-700",
+            "text-gray-700",
+            "dark:text-gray-300",
+            "hover:bg-sporty",
+            "hover:text-white",
+        );
+    renderSessionHistory();
+});
+
+document
+    .getElementById("historyViewSessionBtn")
+    .addEventListener("click", () => {
+        historyView = "session";
+        document
+            .getElementById("historyViewSessionBtn")
+            .classList.add("bg-sporty", "text-white");
+        document
+            .getElementById("historyViewSessionBtn")
+            .classList.remove(
+                "bg-gray-200",
+                "dark:bg-gray-700",
+                "text-gray-700",
+                "dark:text-gray-300",
+                "hover:bg-sporty",
+                "hover:text-white",
+            );
+        document
+            .getElementById("historyViewDayBtn")
+            .classList.remove("bg-sporty", "text-white");
+        document
+            .getElementById("historyViewDayBtn")
+            .classList.add(
+                "bg-gray-200",
+                "dark:bg-gray-700",
+                "text-gray-700",
+                "dark:text-gray-300",
+                "hover:bg-sporty",
+                "hover:text-white",
+            );
+        renderSessionHistory();
+    });
 
 document.getElementById("clearHistoryBtn").addEventListener("click", () => {
     document.getElementById("clearConfirmCheck").checked = false;
@@ -1736,12 +3650,14 @@ document.getElementById("clearHistoryBtn").addEventListener("click", () => {
     document.getElementById("clearConfirmModal").classList.remove("hidden");
 });
 
-document.getElementById("clearConfirmCheck").addEventListener("change", function () {
-    document.getElementById("clearConfirmOk").disabled = !this.checked;
-});
+document
+    .getElementById("clearConfirmCheck")
+    .addEventListener("change", function () {
+        document.getElementById("clearConfirmOk").disabled = !this.checked;
+    });
 
 document.getElementById("clearConfirmOk").addEventListener("click", () => {
-    localStorage.removeItem("wp_history");
+    localStorage.removeItem("wp_sessions");
     document.getElementById("clearConfirmModal").classList.add("hidden");
     renderCharts();
     renderSessionHistory();
@@ -1751,18 +3667,63 @@ document.getElementById("clearConfirmCancel").addEventListener("click", () => {
     document.getElementById("clearConfirmModal").classList.add("hidden");
 });
 
-document.getElementById("saveOnboardingBtn").addEventListener("click", saveOnboarding);
+document
+    .getElementById("saveOnboardingBtn")
+    .addEventListener("click", saveOnboarding);
+
+function onHeightUnitChange(newUnit) {
+    if (newUnit === userHeightUnit) return;
+    // Preserve any value already typed before switching
+    if (userHeightUnit === "ftin") {
+        const ft = parseInt(document.getElementById("heightFtInput")?.value, 10) || 0;
+        const inches = parseInt(document.getElementById("heightInInput")?.value, 10) || 0;
+        if (ft > 0) userHeightCm = ftInToCm(ft, inches);
+    } else {
+        const cm = parseFloat(document.getElementById("heightCmInput")?.value);
+        if (cm > 0) userHeightCm = cm;
+    }
+    userHeightUnit = newUnit;
+    applyHeightToSettingsInputs();
+    applyHeightToOnboardingInputs();
+}
+
+document.getElementById("heightUnitFtIn").addEventListener("click", () => onHeightUnitChange("ftin"));
+document.getElementById("heightUnitCm").addEventListener("click", () => onHeightUnitChange("cm"));
+document.getElementById("onboardingHeightUnitFtIn").addEventListener("click", () => onHeightUnitChange("ftin"));
+document.getElementById("onboardingHeightUnitCm").addEventListener("click", () => onHeightUnitChange("cm"));
 
 // --- Mobile bottom bar ---
-document.getElementById("startBtnM").addEventListener("click",     () => document.getElementById("startBtn").click());
-document.getElementById("stopBtnM").addEventListener("click",      () => document.getElementById("stopBtn").click());
-document.getElementById("pauseBtnM").addEventListener("click",     () => document.getElementById("pauseBtn").click());
-document.getElementById("resumeBtnM").addEventListener("click",    () => document.getElementById("resumeBtn").click());
-document.getElementById("speedDownBtnM").addEventListener("click", () => document.getElementById("speedDownBtn").click());
-document.getElementById("speedUpBtnM").addEventListener("click",   () => document.getElementById("speedUpBtn").click());
-document.getElementById("preset35BtnM").addEventListener("click",  () => startAndSetSpeed(3.5));
-document.getElementById("preset45BtnM").addEventListener("click",  () => startAndSetSpeed(4.5));
-document.getElementById("preset55BtnM").addEventListener("click",  () => startAndSetSpeed(5.5));
+document
+    .getElementById("startBtnM")
+    .addEventListener("click", () =>
+        document.getElementById("startBtn").click(),
+    );
+document
+    .getElementById("stopBtnM")
+    .addEventListener("click", () =>
+        document.getElementById("stopBtn").click(),
+    );
+document
+    .getElementById("pauseBtnM")
+    .addEventListener("click", () =>
+        document.getElementById("pauseBtn").click(),
+    );
+document
+    .getElementById("resumeBtnM")
+    .addEventListener("click", () =>
+        document.getElementById("resumeBtn").click(),
+    );
+document
+    .getElementById("speedDownBtnM")
+    .addEventListener("click", () =>
+        document.getElementById("speedDownBtn").click(),
+    );
+document
+    .getElementById("speedUpBtnM")
+    .addEventListener("click", () =>
+        document.getElementById("speedUpBtn").click(),
+    );
+// Preset buttons are wired dynamically via applySpeedPresets() called from loadDefaults()
 
 // ============================================================
 // Init on DOM Ready
@@ -1783,15 +3744,25 @@ window.addEventListener("DOMContentLoaded", () => {
     updateRecoverBtn();
     updateExportRecoverBtn();
     loadCardState();
-    if ("serviceWorker" in navigator) navigator.serviceWorker.register("./sw.js");
+    if ("serviceWorker" in navigator)
+        navigator.serviceWorker.register("./sw.js");
     document.addEventListener("visibilitychange", () => {
-        if (document.visibilityState === "visible" && isRunning) requestWakeLock();
+        if (document.visibilityState === "visible" && isRunning)
+            requestWakeLock();
     });
     if (window.innerWidth < 768) {
-        ["liveSpeedContent", "historyChartsContent", "sessionHistoryContent"].forEach(id => {
+        [
+            "liveSpeedContent",
+            "historyChartsContent",
+            "sessionHistoryContent",
+        ].forEach((id) => {
             document.getElementById(id).classList.add("hidden");
         });
-        ["liveSpeedChevron", "historyChartsChevron", "sessionHistoryChevron"].forEach(id => {
+        [
+            "liveSpeedChevron",
+            "historyChartsChevron",
+            "sessionHistoryChevron",
+        ].forEach((id) => {
             document.getElementById(id).classList.add("rotate-180");
         });
     }
