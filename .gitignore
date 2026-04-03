@@ -11,3 +11,9 @@ desktop.ini
 
 # Logs
 *.log
+
+# Dependencies
+node_modules/
+
+# Generated (committed — rebuilt by pre-commit hook)
+# output.css

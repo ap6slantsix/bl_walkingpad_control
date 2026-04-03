@@ -7,40 +7,69 @@
     <meta name="theme-color" content="#0ea5e9">
     <link rel="manifest" href="manifest.json">
     <title>MS2H Walking Pad Control</title>
-    <script src="./tailwind.js"></script>
-    <link rel="stylesheet" href="https://unpkg.com/@fortawesome/fontawesome-free@7.2.0/css/all.min.css" integrity="sha384-EXatlQyrOJgDaM9/a74ArMzy7/2bTMSrZj8ID1IPeVmc3GncfCugefCFWSLj8JL/" crossorigin="anonymous">
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js" integrity="sha384-jb8JQMbMoBUzgWatfe6COACi2ljcDdZQ2OxczGA3bGNeWe+6DChMTBJemed7ZnvJ" crossorigin="anonymous"></script>
-    <script>
-        tailwind.config = {
-            darkMode: 'class',
-            theme: {
-                extend: {
-                    colors: {
-                        sporty: '#0ea5e9',
-                        tech: '#1e293b',
-                        accent: '#f59e42',
-                    },
-                },
-            },
-        }
-    </script>
+    <link rel="stylesheet" href="./output.css">
+    <link rel="stylesheet" href="https://unpkg.com/@fortawesome/fontawesome-free@7.2.0/css/all.min.css"
+        integrity="sha384-EXatlQyrOJgDaM9/a74ArMzy7/2bTMSrZj8ID1IPeVmc3GncfCugefCFWSLj8JL/" crossorigin="anonymous">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js"
+        integrity="sha384-jb8JQMbMoBUzgWatfe6COACi2ljcDdZQ2OxczGA3bGNeWe+6DChMTBJemed7ZnvJ"
+        crossorigin="anonymous"></script>
     <style>
         /* Consistent digit spacing in stat values */
-        .tabular-nums { font-variant-numeric: tabular-nums; }
+        .tabular-nums {
+            font-variant-numeric: tabular-nums;
+        }
+
         /* All-time card: 2 label+value pairs per row on mobile, 3 on desktop */
-        #body-alltime { grid-template-columns: auto 1fr auto 1fr; }
+        #body-alltime {
+            grid-template-columns: auto 1fr auto 1fr;
+        }
+
         @media (min-width: 768px) {
-            #body-alltime { grid-template-columns: auto 1fr auto 1fr auto 1fr; }
+            #body-alltime {
+                grid-template-columns: auto 1fr auto 1fr auto 1fr;
+            }
+        }
+
+        .hl-sporty {
+            color: #0ea5e9;
+            font-weight: 600;
+        }
+
+        /* Grid layout classes (replacing inline style attributes) */
+        .grid-2auto {
+            grid-template-columns: auto auto;
+        }
+
+        .grid-auto-3fr {
+            grid-template-columns: auto 1fr 1fr 1fr;
+        }
+
+        .grid-full-span {
+            grid-column: 1 / -1;
+        }
+
+        /* Progress bar default state — JS sets width at runtime via element.style.width */
+        .progress-bar {
+            width: 0%;
+        }
+
+        /* Suppress native <details> disclosure triangle (Safari) */
+        summary::-webkit-details-marker {
+            display: none;
+        }
+
+        summary {
+            list-style: none;
         }
     </style>
 </head>
 
 <body
     class="bg-gray-100 dark:bg-tech min-h-screen text-gray-900 dark:text-white font-sans transition-colors duration-200">
-    <div class="max-w-4xl mx-auto py-8 px-4 pb-36 md:pb-8">
+    <div class="max-w-4xl mx-auto py-8 px-4 pb-44 md:pb-8">
 
         <!-- Header -->
-        <div class="mb-6">
+        <header class="mb-6">
             <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
                 <button id="scanBtn"
                     class="bg-sporty hover:bg-accent text-white font-semibold py-1.5 px-3 rounded shadow flex items-center gap-2 text-sm">

@@ -1,0 +1,17 @@
+{
+  "name": "black_lord_walkingpad_controller",
+  "version": "1.0.0",
+  "description": "![PWA](https://img.shields.io/badge/PWA-enabled-5A0FC8?logo=pwa) ![Bluetooth](https://img.shields.io/badge/Bluetooth-BLE%20%2F%20FTMS-0082FC?logo=bluetooth) ![JavaScript](https://img.shields.io/badge/JavaScript-vanilla-F7DF1E?logo=javascript&logoColor=black) ![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-bundled-06B6D4?logo=tailwindcss&logoColor=white) ![Chart.js](https://img.shields.io/badge/Chart.js-4-FF6384?logo=chartdotjs&logoColor=white) ![No Build](https://img.shields.io/badge/build-none-brightgreen) ![Offline](https://img.shields.io/badge/offline-ready-success?logo=serviceworker)",
+  "main": "script.js",
+  "scripts": {
+    "build": "tailwindcss -i input.css -o output.css --minify",
+    "watch": "tailwindcss -i input.css -o output.css --watch"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "caniuse-lite": "^1.0.30001784",
+    "tailwindcss": "^3.4.19"
+  }
+}
