@@ -224,12 +224,13 @@
                     </div>
                     <!-- Program section -->
                     <div id="program-section" class="border-t border-gray-200 dark:border-gray-700 mt-2 pt-2">
+                        <span class="text-xs text-gray-400 uppercase tracking-wide font-semibold">Program</span>
                         <!-- State 1: no program selected -->
-                        <div id="prog-state-none" class="flex items-center justify-between">
+                        <div id="prog-state-none" class="flex items-center justify-between mt-1">
                             <span class="text-xs text-gray-400 italic">No program active</span>
                             <button id="programBrowseBtn"
                                 class="text-xs text-sky-400 hover:text-sky-500 flex items-center gap-1 transition-colors">
-                                Browse <i class="fas fa-chevron-down text-xs"></i>
+                                Programs <i class="fas fa-chevron-down text-xs"></i>
                             </button>
                         </div>
                         <!-- State 2: program selected, not yet running -->
@@ -248,9 +249,10 @@
                                     </div>
                                 </div>
                                 <div class="flex items-center gap-1.5 shrink-0 mt-0.5">
-                                    <button id="programChangeBtn"
-                                        class="text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors">
-                                        Change
+                                    <button id="programRemoveBtn"
+                                        class="text-xs text-gray-400 hover:text-red-400 transition-colors"
+                                        aria-label="Remove program">
+                                        <i class="fas fa-times"></i>
                                     </button>
                                     <button id="programStartBtn" disabled
                                         class="bg-sky-500 hover:bg-sky-600 text-white font-semibold py-1 px-3 rounded shadow text-xs flex items-center gap-1 opacity-40 cursor-not-allowed transition-opacity">
@@ -276,6 +278,12 @@
                                         Skip
                                     </button>
                                 </div>
+                            </div>
+                            <div class="mt-2 w-fit ml-auto">
+                                <button id="programChangeBtn"
+                                    class="text-xs text-sky-400 hover:text-sky-500 flex items-center gap-1 transition-colors">
+                                    Programs <i class="fas fa-chevron-down text-xs"></i>
+                                </button>
                             </div>
                         </div>
                         <!-- State 3: program running or just completed -->
@@ -357,32 +365,32 @@
                     class="bg-gray-50 dark:bg-gray-900 rounded-xl shadow p-3 flex flex-col gap-2 border border-gray-200 dark:border-gray-600">
                     <div class="flex gap-2">
                         <button id="startBtn"
-                            class="bg-green-500 hover:bg-green-600 text-white font-semibold py-1.5 px-3 rounded shadow flex-1 h-10 flex items-center gap-2 text-base justify-center">
+                            class="bg-green-500 hover:bg-green-600 text-white font-semibold py-1 px-3 rounded shadow flex-1 flex items-center gap-2 text-sm justify-center">
                             <i class="fas fa-play"></i> Start
                         </button>
                         <button id="stopBtn"
-                            class="bg-red-600 hover:bg-red-700 text-white font-semibold py-1.5 px-3 rounded shadow flex-1 h-10 flex items-center gap-2 text-base justify-center">
+                            class="bg-red-600 hover:bg-red-700 text-white font-semibold py-1 px-3 rounded shadow flex-1 flex items-center gap-2 text-sm justify-center">
                             <i class="fas fa-stop"></i> Stop
                         </button>
                     </div>
                     <div class="flex gap-2">
                         <button id="pauseBtn"
-                            class="bg-yellow-500 hover:bg-yellow-600 text-white font-semibold py-1.5 px-3 rounded shadow flex-1 h-10 flex items-center gap-2 text-base justify-center">
+                            class="bg-yellow-500 hover:bg-yellow-600 text-white font-semibold py-1 px-3 rounded shadow flex-1 flex items-center gap-2 text-sm justify-center">
                             <i class="fas fa-pause"></i> Pause
                         </button>
                         <button id="resumeBtn"
-                            class="bg-blue-500 hover:bg-blue-600 text-white font-semibold py-1.5 px-3 rounded shadow flex-1 h-10 flex items-center gap-2 text-base justify-center">
+                            class="bg-blue-500 hover:bg-blue-600 text-white font-semibold py-1 px-3 rounded shadow flex-1 flex items-center gap-2 text-sm justify-center">
                             <i class="fas fa-play"></i> Resume
                         </button>
                     </div>
                     <div id="recoveryBtnRow" class="hidden gap-2">
                         <button id="recoverExportBtn"
-                            class="hidden bg-blue-700 hover:bg-sporty text-white font-semibold py-1 px-3 rounded shadow flex-1 items-center gap-2 justify-center text-sm"
+                            class="hidden bg-gray-600 hover:bg-gray-500 text-white font-semibold py-1 px-3 rounded shadow flex-1 items-center gap-2 justify-center text-sm"
                             title="">
                             <i class="fas fa-file-import"></i> From Export
                         </button>
                         <button id="recoverSessionBtn"
-                            class="hidden bg-yellow-600 hover:bg-accent text-white font-semibold py-1 px-3 rounded shadow flex-1 items-center gap-2 justify-center text-sm"
+                            class="hidden bg-gray-600 hover:bg-gray-500 text-white font-semibold py-1 px-3 rounded shadow flex-1 items-center gap-2 justify-center text-sm"
                             title="">
                             <i class="fas fa-undo"></i> Recover Session
                         </button>
@@ -392,39 +400,39 @@
                     class="bg-gray-50 dark:bg-gray-900 rounded-xl shadow p-3 flex flex-col gap-2 border border-gray-200 dark:border-gray-600">
                     <div class="flex gap-2 flex-1">
                         <button id="speedDownBtn"
-                            class="bg-gray-100 dark:bg-tech hover:bg-sporty text-gray-900 dark:text-white font-semibold px-3 rounded shadow flex-1 h-full flex items-center gap-2 border border-sporty text-base justify-center">
+                            class="bg-gray-100 dark:bg-tech hover:bg-sporty text-gray-900 dark:text-white font-semibold py-1 px-3 rounded shadow flex-1 flex items-center gap-2 border border-sporty text-sm justify-center">
                             &minus;0.5
                         </button>
                         <button id="speedUpBtn"
-                            class="bg-gray-100 dark:bg-tech hover:bg-sporty text-gray-900 dark:text-white font-semibold px-3 rounded shadow flex-1 h-full flex items-center gap-2 border border-sporty text-base justify-center">
+                            class="bg-gray-100 dark:bg-tech hover:bg-sporty text-gray-900 dark:text-white font-semibold py-1 px-3 rounded shadow flex-1 flex items-center gap-2 border border-sporty text-sm justify-center">
                             +0.5
                         </button>
                     </div>
                     <div class="flex gap-2">
                         <button id="presetBtn0"
-                            class="bg-sporty hover:bg-accent text-white font-semibold py-1.5 px-1 rounded shadow flex-1 h-9 text-sm justify-center flex items-center">
+                            class="bg-sporty hover:bg-accent text-white font-semibold py-1 px-1 rounded shadow flex-1 text-sm justify-center flex items-center">
                             3.5
                         </button>
                         <button id="presetBtn1"
-                            class="bg-sporty hover:bg-accent text-white font-semibold py-1.5 px-1 rounded shadow flex-1 h-9 text-sm justify-center flex items-center">
+                            class="bg-sporty hover:bg-accent text-white font-semibold py-1 px-1 rounded shadow flex-1 text-sm justify-center flex items-center">
                             4.5
                         </button>
                         <button id="presetBtn2"
-                            class="bg-sporty hover:bg-accent text-white font-semibold py-1.5 px-1 rounded shadow flex-1 h-9 text-sm justify-center flex items-center">
+                            class="bg-sporty hover:bg-accent text-white font-semibold py-1 px-1 rounded shadow flex-1 text-sm justify-center flex items-center">
                             5.5
                         </button>
                     </div>
                     <div class="flex gap-2">
                         <button id="presetBtn3"
-                            class="bg-sporty hover:bg-accent text-white font-semibold py-1.5 px-1 rounded shadow flex-1 h-9 text-sm justify-center flex items-center">
+                            class="bg-sporty hover:bg-accent text-white font-semibold py-1 px-1 rounded shadow flex-1 text-sm justify-center flex items-center">
                             6.0
                         </button>
                         <button id="presetBtn4"
-                            class="bg-sporty hover:bg-accent text-white font-semibold py-1.5 px-1 rounded shadow flex-1 h-9 text-sm justify-center flex items-center">
+                            class="bg-sporty hover:bg-accent text-white font-semibold py-1 px-1 rounded shadow flex-1 text-sm justify-center flex items-center">
                             7.0
                         </button>
                         <button id="presetBtn5"
-                            class="bg-sporty hover:bg-accent text-white font-semibold py-1.5 px-1 rounded shadow flex-1 h-9 text-sm justify-center flex items-center">
+                            class="bg-sporty hover:bg-accent text-white font-semibold py-1 px-1 rounded shadow flex-1 text-sm justify-center flex items-center">
                             8.0
                         </button>
                     </div>

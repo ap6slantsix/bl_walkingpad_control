@@ -4544,6 +4544,7 @@ document.getElementById("programBrowseBtn").addEventListener("click", openProgra
 
 // Change button in session card state-2
 document.getElementById("programChangeBtn").addEventListener("click", openProgramPicker);
+document.getElementById("programRemoveBtn").addEventListener("click", cancelProgram);
 
 // Start button in session card state-2 — skips warm-up prompt or auto-starts belt+program
 document.getElementById("programStartBtn").addEventListener("click", () => {

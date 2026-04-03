@@ -1,5 +1,5 @@
 "use strict";
-const CACHE = "walkpad-v17";
+const CACHE = "walkpad-v18";
 const ASSETS = ["./", "./index.html", "./script.js", "./manifest.json", "./icon.svg", "./tailwind.js"];
 
 self.addEventListener("install", e => {
