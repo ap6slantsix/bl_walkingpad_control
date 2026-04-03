@@ -11,6 +11,170 @@ const STARTUP_NO_CONNECTION_DISMISS_MS = 4000; // how long to show "not connecte
 const STARTUP_ABORT_TIMEOUT_MS = 15000; // max wait before giving up on startup sequence
 const BELT_SPEED_SET_DELAY_MS = 2500; // pad ramp-up time before sending target speed
 
+// --- Workout Programs ---
+// Steps are pre-expanded (no runtime looping). Speed in km/h, duration in seconds.
+// requiresRunningMode: true → program needs handrail up (max 16 km/h); else walking mode safe (max 12 km/h).
+const PROGRAM_CATEGORIES = [
+    { id: "steady_state",    name: "Steady-State Walks" },
+    { id: "progressive",     name: "Progressive / Ramp" },
+    { id: "hiit",            name: "Interval Training (HIIT)" },
+    { id: "fat_burn",        name: "Fat Burn / Zone 2" },
+    { id: "distance_goals",  name: "Distance Goals" },
+];
+
+function _rep(n, arr) { const r = []; for (let i = 0; i < n; i++) r.push(...arr); return r; }
+
+const WORKOUT_PROGRAMS = [
+    // ── Steady-State Walks ──────────────────────────────────────────────
+    {
+        id: "easy_stroll", category: "steady_state", level: "beginner",
+        name: "Easy Stroll", description: "Gentle habit-building walk at 3.5 km/h",
+        requiresRunningMode: false,
+        steps: [{ name: "Steady Walk", speed: 3.5, duration: 1200 }],
+    },
+    {
+        id: "brisk_walker", category: "steady_state", level: "intermediate",
+        name: "Brisk Walker", description: "Cardio maintenance walk at 6.0 km/h, zone 2–3",
+        requiresRunningMode: false,
+        steps: [{ name: "Brisk Walk", speed: 6.0, duration: 1800 }],
+    },
+    {
+        id: "power_walk", category: "steady_state", level: "advanced",
+        name: "Power Walk", description: "High-intensity sustained effort at 8.0 km/h",
+        requiresRunningMode: false,
+        steps: [{ name: "Power Walk", speed: 8.0, duration: 2700 }],
+    },
+    // ── Progressive / Ramp ──────────────────────────────────────────────
+    {
+        id: "progressive_walk", category: "progressive", level: "beginner",
+        name: "Progressive Walk", description: "5 escalating phases, 3.5 → 6.0 km/h",
+        requiresRunningMode: false,
+        steps: [
+            { name: "Easy Walk",     speed: 3.5, duration: 300 },
+            { name: "Moderate Walk", speed: 4.5, duration: 300 },
+            { name: "Brisk Walk",    speed: 5.5, duration: 300 },
+            { name: "Power Walk",    speed: 6.0, duration: 300 },
+            { name: "Cool-down",     speed: 4.0, duration: 300 },
+        ],
+    },
+    {
+        id: "pyramid_intervals", category: "progressive", level: "intermediate",
+        name: "Pyramid Intervals", description: "Ramps 4.0 → 9.0 km/h peak, then back down",
+        requiresRunningMode: false,
+        steps: [
+            { name: "Warm-up", speed: 4.0, duration: 180 },
+            { name: "Level 1", speed: 5.0, duration: 180 },
+            { name: "Level 2", speed: 6.0, duration: 180 },
+            { name: "Level 3", speed: 7.0, duration: 180 },
+            { name: "Level 4", speed: 8.0, duration: 180 },
+            { name: "Peak",    speed: 9.0, duration: 120 },
+            { name: "Level 4", speed: 8.0, duration: 180 },
+            { name: "Level 3", speed: 7.0, duration: 180 },
+            { name: "Level 2", speed: 6.0, duration: 180 },
+            { name: "Level 1", speed: 5.0, duration: 180 },
+            { name: "Cool-down", speed: 4.0, duration: 180 },
+        ],
+    },
+    // ── Interval Training (HIIT) ─────────────────────────────────────────
+    {
+        id: "walk_jog_starter", category: "hiit", level: "beginner",
+        name: "Walk / Jog Starter", description: "5× walk at 4.0 / jog at 7.0 km/h intervals",
+        requiresRunningMode: false,
+        steps: [
+            { name: "Warm-up", speed: 3.5, duration: 120 },
+            ..._rep(5, [
+                { name: "Walk", speed: 4.0, duration: 180 },
+                { name: "Jog",  speed: 7.0, duration: 60  },
+            ]),
+            { name: "Cool-down", speed: 3.0, duration: 120 },
+        ],
+    },
+    {
+        id: "c25k_week1", category: "hiit", level: "beginner",
+        name: "C25K Week 1", description: "8× 60s jog at 8.0 / 90s walk at 5.0 km/h",
+        requiresRunningMode: false,
+        steps: [
+            { name: "Warm-up Walk", speed: 5.0, duration: 300 },
+            ..._rep(8, [
+                { name: "Jog",  speed: 8.0, duration: 60 },
+                { name: "Walk", speed: 5.0, duration: 90 },
+            ]),
+            { name: "Cool-down Walk", speed: 4.0, duration: 300 },
+        ],
+    },
+    {
+        id: "sprint_intervals", category: "hiit", level: "intermediate",
+        name: "Sprint Intervals", description: "6× 1-min sprint at 12.0 / 2-min recovery at 5.0 km/h",
+        requiresRunningMode: false,
+        steps: [
+            { name: "Warm-up", speed: 5.0, duration: 180 },
+            ..._rep(6, [
+                { name: "Sprint",   speed: 12.0, duration: 60  },
+                { name: "Recovery", speed: 5.0,  duration: 120 },
+            ]),
+            { name: "Cool-down", speed: 4.0, duration: 180 },
+        ],
+    },
+    {
+        id: "tabata_sprint", category: "hiit", level: "advanced",
+        name: "Tabata Sprint", description: "8× 20s at 10.0 km/h / 10s rest — classic Tabata",
+        requiresRunningMode: false,
+        steps: [
+            { name: "Warm-up", speed: 4.5, duration: 300 },
+            ..._rep(8, [
+                { name: "Sprint", speed: 10.0, duration: 20 },
+                { name: "Rest",   speed: 3.5,  duration: 10 },
+            ]),
+            { name: "Cool-down", speed: 4.0, duration: 300 },
+        ],
+    },
+    {
+        id: "peak_performance", category: "hiit", level: "advanced",
+        name: "Peak Performance", description: "10× 45s at 16.0 km/h max-effort, running mode required",
+        requiresRunningMode: true,
+        steps: [
+            { name: "Warm-up", speed: 6.0, duration: 180 },
+            ..._rep(10, [
+                { name: "Peak Sprint", speed: 16.0, duration: 45 },
+                { name: "Recovery",    speed: 5.0,  duration: 90 },
+            ]),
+            { name: "Cool-down", speed: 4.0, duration: 180 },
+        ],
+    },
+    // ── Fat Burn / Zone 2 ────────────────────────────────────────────────
+    {
+        id: "fat_burn_foundation", category: "fat_burn", level: "beginner",
+        name: "Fat Burn Foundation", description: "Zone 2 aerobic base-building at 4.75 km/h",
+        requiresRunningMode: false,
+        steps: [{ name: "Zone 2 Walk", speed: 4.75, duration: 1800 }],
+    },
+    {
+        id: "zone2_cruise", category: "fat_burn", level: "intermediate",
+        name: "Zone 2 Cruise", description: "Sustained fat oxidation cruise at 6.5 km/h",
+        requiresRunningMode: false,
+        steps: [{ name: "Zone 2 Cruise", speed: 6.5, duration: 2700 }],
+    },
+    {
+        id: "endurance_builder", category: "fat_burn", level: "advanced",
+        name: "Endurance Builder", description: "Long aerobic base session at 7.5 km/h",
+        requiresRunningMode: false,
+        steps: [{ name: "Endurance Walk", speed: 7.5, duration: 3600 }],
+    },
+    // ── Distance Goals (time-based approximations of ~5 km) ─────────────
+    {
+        id: "first_5k", category: "distance_goals", level: "beginner",
+        name: "5K Foundation Walk", description: "~5 km walk at 4.5 km/h comfortable pace",
+        requiresRunningMode: false, approximateDistanceKm: 5.0,
+        steps: [{ name: "5K Walk", speed: 4.5, duration: 4020 }],
+    },
+    {
+        id: "5k_time_trial", category: "distance_goals", level: "intermediate",
+        name: "5K Time Trial", description: "~5 km benchmark effort at 8.6 km/h running pace",
+        requiresRunningMode: false, approximateDistanceKm: 5.0,
+        steps: [{ name: "5K Pace", speed: 8.6, duration: 2100 }],
+    },
+];
+
 // --- Wake Lock ---
 let wakeLock = null;
 
@@ -214,6 +378,37 @@ let webhookSecret = "";
 let cardCollapsed = {};
 let cardHidden = {};
 
+// --- Workout Program State ---
+let activeProgram          = null;   // selected WORKOUT_PROGRAMS entry, or null
+let programStepIndex       = 0;      // current step index (0-based)
+let programStepElapsed     = 0;      // seconds elapsed in current step
+let programTotalElapsed    = 0;      // seconds elapsed overall in this program run
+let programRunning         = false;  // true while a program is actively executing
+let programUserOverride    = false;  // true after user manually adjusts speed mid-program
+let programCompletedFlag   = false;  // true when program finishes naturally (for history save)
+let programResuming        = false;  // true when resuming from saved state (skip counter reset)
+let programCompleteBannerTimer = null;
+let programFilterCategory  = "all";  // active filter pill in program picker
+let pendingProgramId       = null;   // program ID to start once belt is active (post-startup or post-warmup)
+let warmupDurationMins     = 10;     // user-adjustable warm-up duration (5–30 min)
+let warmupPromptActive     = false;  // true while warm-up question is visible in state-2
+
+// --- Program Category Display Maps ---
+const CATEGORY_PILL_LABELS = {
+    steady_state:    "Steady",
+    progressive:     "Ramp",
+    hiit:            "HIIT",
+    fat_burn:        "Fat Burn",
+    distance_goals:  "5K",
+};
+const CATEGORY_ICONS = {
+    steady_state:   { icon: "fa-arrow-right",     color: "bg-sky-100 text-sky-600 dark:bg-sky-900/50 dark:text-sky-400" },
+    progressive:    { icon: "fa-arrow-trend-up",  color: "bg-violet-100 text-violet-600 dark:bg-violet-900/50 dark:text-violet-400" },
+    hiit:           { icon: "fa-bolt",            color: "bg-orange-100 text-orange-600 dark:bg-orange-900/50 dark:text-orange-400" },
+    fat_burn:       { icon: "fa-fire",            color: "bg-amber-100 text-amber-600 dark:bg-amber-900/50 dark:text-amber-400" },
+    distance_goals: { icon: "fa-flag-checkered",  color: "bg-green-100 text-green-600 dark:bg-green-900/50 dark:text-green-400" },
+};
+
 function applyCardCollapsed(id, collapsed) {
     const body = document.getElementById("body-" + id);
     const chevronEl = document.getElementById("chevron-" + id);
@@ -289,6 +484,409 @@ function loadCardState() {
         });
     });
 }
+
+// ============================================================
+// Workout Programs
+// ============================================================
+
+function _fmtProgTime(s) {
+    const m = Math.floor(s / 60), sec = s % 60;
+    return m + ":" + String(sec).padStart(2, "0");
+}
+
+function _progTotalSeconds(prog) {
+    return prog.steps.reduce((t, s) => t + s.duration, 0);
+}
+
+function selectProgram(id) {
+    activeProgram = WORKOUT_PROGRAMS.find((p) => p.id === id) || null;
+    programStepIndex = 0;
+    programStepElapsed = 0;
+    programTotalElapsed = 0;
+    programRunning = false;
+    programUserOverride = false;
+    programCompletedFlag = false;
+    programResuming = false;
+    if (id) localStorage.setItem("wp_last_program_id", id);
+    renderProgramPicker();
+    renderProgramSection();
+}
+
+function startProgram() {
+    if (!activeProgram || !isRunning) return;
+    clearTimeout(programCompleteBannerTimer);
+    if (!programResuming) {
+        // Fresh start — reset counters
+        programStepIndex = 0;
+        programStepElapsed = 0;
+        programTotalElapsed = 0;
+    }
+    programRunning = true;
+    programUserOverride = false;
+    programCompletedFlag = false;
+    programResuming = false;
+    const step = activeProgram.steps[programStepIndex];
+    lastSpeed = step.speed;
+    ftmsCmd(ftmsSpeedBytes(step.speed));
+    haptic(50);
+    document.getElementById("card-programs").classList.add("hidden");
+    renderProgramSection();
+}
+
+function cancelProgram() {
+    clearTimeout(programCompleteBannerTimer);
+    programRunning = false;
+    programCompletedFlag = false;
+    programResuming = false;
+    pendingProgramId = null;
+    warmupPromptActive = false;
+    activeProgram = null;
+    clearProgramState();
+    renderProgramSection();
+    renderProgramPicker();
+}
+
+// Build a warm-up program dynamically from the user's preferred duration
+function buildWarmupProgram(durationMins) {
+    const totalSec = durationMins * 60;
+    const phase = Math.floor(totalSec / 3);
+    const rem   = totalSec - phase * 3;
+    return {
+        id:                 "_warmup",
+        name:               `Warm-up (${durationMins} min)`,
+        category:           "steady_state",
+        level:              "beginner",
+        description:        "Pre-workout ramp-up",
+        requiresRunningMode: false,
+        steps: [
+            { name: "Easy Walk",   speed: 3.5, duration: phase },
+            { name: "Steady Walk", speed: 5.0, duration: phase },
+            { name: "Brisk Walk",  speed: 6.0, duration: phase + rem },
+        ],
+    };
+}
+
+// Launch program immediately (belt running) or queue it for when belt starts
+function launchOrQueueProgram(id) {
+    const prog = WORKOUT_PROGRAMS.find((p) => p.id === id) || null;
+    if (!prog) return;
+    if (!cFTMSControl && !isConnected) {
+        // No connection yet — show "not connected" indicator
+        showStartupIndicator(prog.steps[0].speed);
+        return;
+    }
+    if (isRunning) {
+        // Belt already running — start immediately
+        selectProgram(id);
+        startProgram();
+    } else {
+        // Queue program and start the belt
+        selectProgram(id);
+        pendingProgramId = id;
+        const firstSpeed = prog.steps[0].speed;
+        pendingResumeSpeed = firstSpeed;
+        ftmsCmd([0x07]);
+        showStartupIndicator(firstSpeed);
+    }
+}
+
+// Launch warm-up then chain to targetId
+function launchWarmup(targetId) {
+    warmupPromptActive = false;
+    pendingProgramId = targetId;
+    const wu = buildWarmupProgram(warmupDurationMins);
+    // Patch warm-up into activeProgram directly (it's not in WORKOUT_PROGRAMS)
+    activeProgram       = wu;
+    programStepIndex    = 0;
+    programStepElapsed  = 0;
+    programTotalElapsed = 0;
+    programCompletedFlag = false;
+    programResuming     = false;
+    if (!isRunning) {
+        // Belt not running — queue warm-up start
+        pendingResumeSpeed = wu.steps[0].speed;
+        ftmsCmd([0x07]);
+        showStartupIndicator(wu.steps[0].speed);
+        // pendingProgramId is the *chained* target; the warm-up kicks off via
+        // applyPendingProgram() once the belt starts, but we've already set activeProgram.
+        // Clear pendingProgramId temporarily — it will be restored after warm-up finishes.
+        // Store the chain target in a separate flag and restore after warm-up.
+        pendingProgramId = targetId; // chain target remains set
+        programRunning = false;      // startProgram() will fire via applyPendingProgram
+    } else {
+        startProgram();
+    }
+}
+
+// Called when user selects a program from the picker (not on page-load restore)
+function programPickerSelected(id) {
+    selectProgram(id);
+    warmupPromptActive = false;
+    // Determine if warm-up prompt is needed: belt hasn't been active ≥5 min this session
+    const needsWarmup = cumTimeSeconds < 300;
+    if (needsWarmup) {
+        warmupPromptActive = true;
+        renderProgramSection(); // shows state-2 with warm-up prompt visible
+    } else {
+        launchOrQueueProgram(id);
+    }
+}
+
+function tickProgram() {
+    if (!programRunning || isPaused || !isRunning) return;
+    programStepElapsed++;
+    programTotalElapsed++;
+    const step = activeProgram.steps[programStepIndex];
+    if (programStepElapsed >= step.duration) {
+        programStepIndex++;
+        if (programStepIndex >= activeProgram.steps.length) {
+            programRunning = false;
+            programCompletedFlag = true;
+            clearProgramState();
+            haptic([100, 50, 100, 50, 200]);
+            const chainId = pendingProgramId;
+            pendingProgramId = null;
+            renderProgramSection();
+            if (chainId && isRunning) {
+                // Auto-chain: warm-up → target program (3s transition)
+                programCompleteBannerTimer = setTimeout(() => {
+                    programCompletedFlag = false;
+                    launchOrQueueProgram(chainId);
+                }, 3000);
+            } else {
+                programCompleteBannerTimer = setTimeout(() => {
+                    if (!programRunning) {
+                        programCompletedFlag = false;
+                        activeProgram = null;
+                        renderProgramSection();
+                        renderProgramPicker();
+                    }
+                }, 8000);
+            }
+            return;
+        }
+        programStepElapsed = 0;
+        programUserOverride = false;
+        const next = activeProgram.steps[programStepIndex];
+        lastSpeed = next.speed;
+        ftmsCmd(ftmsSpeedBytes(next.speed));
+        haptic(30);
+    }
+    saveProgramState();
+    renderProgramSection();
+}
+
+function updateProgramStartBtnState() {
+    const btn = document.getElementById("programStartBtn");
+    const hint = document.getElementById("prog-start-hint");
+    if (!btn) return;
+    // Button enabled whenever a program is selected and not actively running
+    // (it now handles belt auto-start itself)
+    const canStart = !!activeProgram && !programRunning;
+    btn.disabled = !canStart;
+    btn.classList.toggle("opacity-40", !canStart);
+    btn.classList.toggle("cursor-not-allowed", !canStart);
+    if (hint) hint.textContent = "";
+}
+
+function renderProgramFilterPills() {
+    const pillsEl = document.getElementById("program-filter-pills");
+    if (!pillsEl) return;
+    const catPillCls = {
+        steady_state:   { active: "bg-sky-500 text-white",     inactive: "bg-sky-100 dark:bg-sky-900/40 text-sky-700 dark:text-sky-300 hover:bg-sky-200 dark:hover:bg-sky-900/60" },
+        progressive:    { active: "bg-violet-500 text-white",  inactive: "bg-violet-100 dark:bg-violet-900/40 text-violet-700 dark:text-violet-300 hover:bg-violet-200 dark:hover:bg-violet-900/60" },
+        hiit:           { active: "bg-orange-500 text-white",  inactive: "bg-orange-100 dark:bg-orange-900/40 text-orange-700 dark:text-orange-300 hover:bg-orange-200 dark:hover:bg-orange-900/60" },
+        fat_burn:       { active: "bg-amber-500 text-white",   inactive: "bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 hover:bg-amber-200 dark:hover:bg-amber-900/60" },
+        distance_goals: { active: "bg-emerald-500 text-white", inactive: "bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-200 dark:hover:bg-emerald-900/60" },
+    };
+    const allPill = `<button class="prog-pill text-xs font-semibold rounded-full px-2.5 py-1 transition-colors ${programFilterCategory === "all" ? "bg-sky-500 text-white" : "bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600"}" data-cat="all">All</button>`;
+    const catPills = PROGRAM_CATEGORIES.map((cat) => {
+        const label = CATEGORY_PILL_LABELS[cat.id] || cat.name;
+        const active = programFilterCategory === cat.id;
+        const cls = catPillCls[cat.id];
+        return `<button class="prog-pill text-xs font-semibold rounded-full px-2.5 py-1 transition-colors ${active ? cls.active : cls.inactive}" data-cat="${cat.id}">${label}</button>`;
+    }).join("");
+    pillsEl.innerHTML = allPill + catPills;
+}
+
+function renderProgramPicker() {
+    renderProgramFilterPills();
+    const list = document.getElementById("program-picker-list");
+    if (!list) return;
+    const levelBadgeCls = {
+        beginner:     "bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300",
+        intermediate: "bg-yellow-100 text-yellow-700 dark:bg-yellow-900 dark:text-yellow-300",
+        advanced:     "bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300",
+    };
+    const levelBorderCls = {
+        beginner:     "border-l-green-400 dark:border-l-green-500",
+        intermediate: "border-l-amber-400 dark:border-l-amber-500",
+        advanced:     "border-l-red-400 dark:border-l-red-500",
+    };
+    const speedChipCls = {
+        steady_state:   "text-xs bg-sky-100 dark:bg-sky-900/50 text-sky-700 dark:text-sky-300 rounded px-1.5 py-0.5 tabular-nums",
+        progressive:    "text-xs bg-violet-100 dark:bg-violet-900/50 text-violet-700 dark:text-violet-300 rounded px-1.5 py-0.5 tabular-nums",
+        hiit:           "text-xs bg-orange-100 dark:bg-orange-900/50 text-orange-700 dark:text-orange-300 rounded px-1.5 py-0.5 tabular-nums",
+        fat_burn:       "text-xs bg-amber-100 dark:bg-amber-900/50 text-amber-700 dark:text-amber-300 rounded px-1.5 py-0.5 tabular-nums",
+        distance_goals: "text-xs bg-emerald-100 dark:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300 rounded px-1.5 py-0.5 tabular-nums",
+    };
+    const timeCls = "text-xs bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 rounded px-1.5 py-0.5 tabular-nums";
+    const catHeadingCls = {
+        steady_state:   "text-sky-500 dark:text-sky-400",
+        progressive:    "text-violet-500 dark:text-violet-400",
+        hiit:           "text-orange-500 dark:text-orange-400",
+        fat_burn:       "text-amber-500 dark:text-amber-400",
+        distance_goals: "text-emerald-500 dark:text-emerald-400",
+    };
+    let html = "";
+    PROGRAM_CATEGORIES.forEach((cat) => {
+        if (programFilterCategory !== "all" && programFilterCategory !== cat.id) return;
+        const progs = WORKOUT_PROGRAMS.filter((p) => p.category === cat.id);
+        if (!progs.length) return;
+        if (programFilterCategory === "all") {
+            const headCls = catHeadingCls[cat.id] || "text-gray-400";
+            html += `<div class="col-span-2 md:col-span-3 text-xs font-semibold tracking-wide mt-2 mb-0.5 px-1 ${headCls}">${cat.name}</div>`;
+        }
+        progs.forEach((p) => {
+            const totalSec = _progTotalSeconds(p);
+            const mins = Math.round(totalSec / 60);
+            const isSelected = activeProgram && activeProgram.id === p.id;
+            const levelLabel = p.level.charAt(0).toUpperCase() + p.level.slice(1);
+            const speeds = [...new Set(p.steps.map(s => s.speed))].sort((a, b) => a - b);
+            const speedLabel = speeds.length === 1
+                ? `${speeds[0]} km/h`
+                : `${speeds[0]}–${speeds[speeds.length - 1]} km/h`;
+            const borderCls = levelBorderCls[p.level] || "border-l-gray-300";
+            const selectedCls = isSelected
+                ? "border-sky-400 bg-sky-50 dark:bg-sky-900/30"
+                : "border-gray-200 dark:border-gray-700 hover:border-sky-300 hover:bg-gray-50 dark:hover:bg-gray-700/40";
+            const runBadge = p.requiresRunningMode
+                ? `<span class="text-xs bg-orange-100 text-orange-700 dark:bg-orange-900/60 dark:text-orange-300 rounded px-1 py-0.5 font-medium">Running Mode</span>`
+                : "";
+            html += `<button class="program-item w-full text-left rounded-lg p-2 border border-l-[3px] transition-colors flex flex-col h-full ${borderCls} ${selectedCls}" data-id="${p.id}">
+  <div class="font-semibold text-sm text-gray-900 dark:text-white truncate leading-tight">${p.name}</div>
+  <div class="text-xs text-gray-400 dark:text-gray-500 line-clamp-2 mt-0.5 flex-1">${p.description}</div>
+  <div class="flex items-center gap-1.5 mt-1.5 flex-wrap">
+    <span class="text-xs rounded px-1.5 py-0.5 font-medium ${levelBadgeCls[p.level] || ""}">${levelLabel}</span>
+    <span class="${timeCls}"><i class="fas fa-clock text-[10px] mr-0.5 opacity-50"></i>${mins} min</span>
+    <span class="${speedChipCls[p.category] || timeCls}"><i class="fas fa-gauge-high text-[10px] mr-0.5 opacity-70"></i>${speedLabel}</span>
+    ${p.approximateDistanceKm ? `<span class="${timeCls}">${p.approximateDistanceKm} km</span>` : ""}
+    ${runBadge}
+  </div>
+</button>`;
+        });
+    });
+    list.innerHTML = html;
+}
+
+function renderProgramSection() {
+    const stateNone     = document.getElementById("prog-state-none");
+    const stateSelected = document.getElementById("prog-state-selected");
+    const stateRunning  = document.getElementById("prog-state-running");
+    if (!stateNone) return;
+
+    // Determine which state to show
+    const showRunning  = programRunning || (!programRunning && activeProgram && programCompletedFlag);
+    const showSelected = !showRunning && activeProgram;
+    const showNone     = !showRunning && !showSelected;
+
+    stateNone.classList.toggle("hidden", !showNone);
+    stateSelected.classList.toggle("hidden", !showSelected);
+    stateRunning.classList.toggle("hidden", !showRunning);
+
+    // State 2: populate selected program info
+    if (showSelected) {
+        const catIcon = CATEGORY_ICONS[activeProgram.category] || { icon: "fa-route", color: "bg-gray-100 text-gray-500" };
+        const levelColours = {
+            beginner:     "bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300",
+            intermediate: "bg-yellow-100 text-yellow-700 dark:bg-yellow-900 dark:text-yellow-300",
+            advanced:     "bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300",
+        };
+        const iconEl = document.getElementById("prog-sel-icon");
+        if (iconEl) {
+            iconEl.className = `shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-xs ${catIcon.color}`;
+            iconEl.innerHTML = `<i class="fas ${catIcon.icon}"></i>`;
+        }
+        const nameEl = document.getElementById("prog-sel-name");
+        if (nameEl) nameEl.textContent = activeProgram.name;
+
+        const levelEl = document.getElementById("prog-sel-level");
+        if (levelEl) {
+            levelEl.className = `text-xs rounded px-1 py-0.5 ${levelColours[activeProgram.level] || ""}`;
+            levelEl.textContent = activeProgram.level;
+        }
+        const metaEl = document.getElementById("prog-sel-meta");
+        if (metaEl) {
+            const totalSec = _progTotalSeconds(activeProgram);
+            const mins = Math.round(totalSec / 60);
+            const parts = [`~${mins} min`];
+            if (activeProgram.estimatedCalories) parts.push(`~${activeProgram.estimatedCalories} kcal`);
+            if (activeProgram.approximateDistanceKm) parts.push(`~${activeProgram.approximateDistanceKm} km`);
+            metaEl.textContent = parts.join(" · ");
+        }
+        // Warm-up prompt
+        const wuPrompt = document.getElementById("prog-warmup-prompt");
+        if (wuPrompt) {
+            wuPrompt.classList.toggle("hidden", !warmupPromptActive);
+            const durLabel = document.getElementById("warmupDurationLabel");
+            if (durLabel) durLabel.textContent = warmupDurationMins;
+        }
+        updateProgramStartBtnState();
+        return;
+    }
+
+    if (!showRunning) return;
+
+    // State 3: program running or just completed
+    if (!programRunning && activeProgram && programCompletedFlag) {
+        document.getElementById("prog-name").textContent = activeProgram.name;
+        document.getElementById("prog-step-name").textContent = "Program Complete!";
+        document.getElementById("prog-step-elapsed").textContent = "";
+        document.getElementById("prog-step-duration").textContent = "";
+        document.getElementById("prog-step-bar").style.width = "100%";
+        document.getElementById("prog-step-bar").classList.replace("bg-sky-500", "bg-green-500");
+        document.getElementById("prog-next-wrap").classList.add("hidden");
+        document.getElementById("prog-overall-bar").style.width = "100%";
+        document.getElementById("prog-elapsed-time").textContent = _fmtProgTime(_progTotalSeconds(activeProgram));
+        document.getElementById("prog-total-time").textContent = _fmtProgTime(_progTotalSeconds(activeProgram));
+        document.getElementById("prog-override-badge").classList.add("hidden");
+        return;
+    }
+
+    if (!programRunning) return;
+
+    const step = activeProgram.steps[programStepIndex];
+    const totalSec = _progTotalSeconds(activeProgram);
+    const stepPct = step.duration > 0 ? Math.min(100, (programStepElapsed / step.duration) * 100) : 0;
+    const overallPct = totalSec > 0 ? Math.min(100, (programTotalElapsed / totalSec) * 100) : 0;
+    const nextStep = activeProgram.steps[programStepIndex + 1];
+
+    const chainedProg = pendingProgramId ? WORKOUT_PROGRAMS.find((p) => p.id === pendingProgramId) : null;
+    const progLabel = chainedProg ? `${activeProgram.name} → ${chainedProg.name}` : activeProgram.name;
+    document.getElementById("prog-name").textContent = progLabel;
+    document.getElementById("prog-step-name").textContent = step.name + " · " + step.speed.toFixed(1) + " km/h";
+    document.getElementById("prog-step-elapsed").textContent = _fmtProgTime(programStepElapsed);
+    document.getElementById("prog-step-duration").textContent = _fmtProgTime(step.duration);
+    document.getElementById("prog-step-bar").style.width = stepPct + "%";
+    document.getElementById("prog-step-bar").classList.replace("bg-green-500", "bg-sky-500");
+
+    const nextWrap = document.getElementById("prog-next-wrap");
+    if (nextStep) {
+        nextWrap.classList.remove("hidden");
+        document.getElementById("prog-next-name").textContent = nextStep.name;
+        document.getElementById("prog-next-speed").textContent = nextStep.speed.toFixed(1);
+    } else {
+        nextWrap.classList.add("hidden");
+    }
+
+    document.getElementById("prog-overall-bar").style.width = overallPct + "%";
+    document.getElementById("prog-elapsed-time").textContent = _fmtProgTime(programTotalElapsed);
+    document.getElementById("prog-total-time").textContent = _fmtProgTime(totalSec);
+    document.getElementById("prog-override-badge").classList.toggle("hidden", !programUserOverride);
+}
+
+// Keep legacy alias so existing callers work without mass-rename
+function renderActiveProgramBanner() { renderProgramSection(); }
 
 // --- Goals ---
 let goalActiveDays = 5;
@@ -439,6 +1037,8 @@ function handleFTMSTreadmill(event) {
     if (pendingResumeSpeed > 0) {
         const targetSpeed = pendingResumeSpeed;
         pendingResumeSpeed = 0;
+        const chainId = pendingProgramId;
+        pendingProgramId = null;
         setStartupStep(
             "step-speed",
             "active",
@@ -452,6 +1052,10 @@ function handleFTMSTreadmill(event) {
                 `Speed set to ${targetSpeed.toFixed(1)} km/h`,
             );
             dismissStartupIndicator();
+            // If a program was queued for auto-start, kick it off now
+            if (chainId && activeProgram && activeProgram.id === chainId) {
+                startProgram();
+            }
         }, BELT_SPEED_SET_DELAY_MS);
     }
 
@@ -494,6 +1098,7 @@ function handleFTMSStatus(event) {
         setStatus("Running", "bg-green-500");
         requestWakeLock();
         setStartupStep("step-belt", "active", "Belt starting…");
+        updateProgramStartBtnState();
     } else if (
         opcode === 0x02 &&
         value.byteLength >= 2 &&
@@ -516,6 +1121,8 @@ function handleFTMSStatus(event) {
             isPaused = false;
             setStatus("Stopped", "bg-orange-400");
             releaseWakeLock();
+            if (programRunning) cancelProgram();
+            updateProgramStartBtnState();
             updateCurrentStats();
             exportStats().then(() => clearCurrentStats());
             return;
@@ -595,6 +1202,11 @@ async function connectToDevice() {
     setStatus("Connected", "bg-green-500");
     // Request FTMS control after a short delay to let the pad settle
     setTimeout(() => ftmsCmd([0x01]), 600);
+    // If a program was running, re-send current step speed after reconnect settle time
+    if (programRunning && activeProgram) {
+        const step = activeProgram.steps[programStepIndex];
+        if (step) setTimeout(() => ftmsCmd(ftmsSpeedBytes(step.speed)), 800);
+    }
 }
 
 async function initBLE() {
@@ -772,11 +1384,7 @@ function updateCumulativeStats() {
     )
         .toISOString()
         .slice(11, 19);
-    document.getElementById("cumMaxSpeed").textContent = maxSpeed.toFixed(1);
-    document.getElementById("cumAvgSpeed").textContent =
-        speedSamples > 0 ? (speedSum / speedSamples).toFixed(2) : "0.00";
     document.getElementById("cumPauseCount").textContent = pauseCount;
-    document.getElementById("cumSteps").textContent = cumSteps;
     autoSaveCumulativeStats();
     updateGoalProgress();
     updateTodayTotals();
@@ -863,6 +1471,98 @@ function saveSessionBackup() {
     };
     localStorage.setItem("wp_session_backup", JSON.stringify(backup));
     updateRecoverBtn();
+}
+
+// ── Program state persistence ────────────────────────────────────────────────
+
+function saveProgramState() {
+    if (!programRunning || !activeProgram) return;
+    localStorage.setItem("wp_program_state", JSON.stringify({
+        programId:           activeProgram.id,
+        programStepIndex,
+        programStepElapsed,
+        programTotalElapsed,
+        programUserOverride,
+        savedAt:             Date.now(),
+    }));
+}
+
+function clearProgramState() {
+    localStorage.removeItem("wp_program_state");
+}
+
+function loadProgramState() {
+    try {
+        const raw = localStorage.getItem("wp_program_state");
+        if (!raw) return null;
+        const ps = JSON.parse(raw);
+        // Discard if older than 1 hour
+        if (!ps || Date.now() - ps.savedAt > 3_600_000) {
+            clearProgramState();
+            return null;
+        }
+        // Verify the program still exists
+        if (!WORKOUT_PROGRAMS.find((p) => p.id === ps.programId)) {
+            clearProgramState();
+            return null;
+        }
+        return ps;
+    } catch (e) {
+        clearProgramState();
+        return null;
+    }
+}
+
+function offerProgramResume(ps) {
+    const prog = WORKOUT_PROGRAMS.find((p) => p.id === ps.programId);
+    if (!prog) return;
+    const totalSteps = prog.steps.length;
+    const elapsed = _fmtProgTime(ps.programTotalElapsed);
+    // Pre-load program into state (not running yet)
+    activeProgram       = prog;
+    programStepIndex    = ps.programStepIndex;
+    programStepElapsed  = ps.programStepElapsed;
+    programTotalElapsed = ps.programTotalElapsed;
+    programUserOverride = ps.programUserOverride || false;
+    programRunning      = false;
+    programResuming     = true;
+    programCompletedFlag = false;
+    localStorage.setItem("wp_last_program_id", prog.id);
+    // Show the resume notification inline in the session card
+    const banner = document.createElement("div");
+    banner.id = "prog-resume-banner";
+    banner.className = "mt-1 p-2 rounded-lg bg-sky-50 dark:bg-sky-900/30 border border-sky-300 dark:border-sky-700 text-xs flex items-center justify-between gap-2";
+    banner.innerHTML = `
+        <span class="text-sky-700 dark:text-sky-300">
+            <i class="fas fa-history mr-1"></i>
+            <strong>${prog.name}</strong> interrupted — step ${ps.programStepIndex + 1}/${totalSteps}, ${elapsed} elapsed
+        </span>
+        <div class="flex gap-1.5 shrink-0">
+            <button id="prog-resume-confirm" class="bg-sky-500 hover:bg-sky-600 text-white rounded px-2 py-0.5 font-semibold">Resume</button>
+            <button id="prog-resume-dismiss" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 px-1">✕</button>
+        </div>`;
+    const section = document.getElementById("program-section");
+    if (section) section.insertAdjacentElement("afterend", banner);
+
+    document.getElementById("prog-resume-confirm").addEventListener("click", () => {
+        banner.remove();
+        clearProgramState();
+        renderProgramSection();
+        renderProgramPicker();
+    });
+    document.getElementById("prog-resume-dismiss").addEventListener("click", () => {
+        banner.remove();
+        programResuming = false;
+        activeProgram = null;
+        programStepIndex = 0;
+        programStepElapsed = 0;
+        programTotalElapsed = 0;
+        clearProgramState();
+        renderProgramSection();
+        renderProgramPicker();
+    });
+    renderProgramSection();
+    renderProgramPicker();
 }
 
 function syncRecoveryRow() {
@@ -1025,6 +1725,9 @@ function loadDefaults() {
     webhookSecret = localStorage.getItem("wp_webhook_secret") || "";
     document.getElementById("webhookUrlInput").value = webhookUrl;
     document.getElementById("webhookSecretInput").value = webhookSecret;
+    const wud = parseInt(localStorage.getItem("wp_warmup_duration_mins"), 10);
+    if (!isNaN(wud) && wud >= 5 && wud <= 30) warmupDurationMins = wud;
+    document.getElementById("warmupDurationInput").value = warmupDurationMins;
 }
 
 function setPillActive(activeId, inactiveId) {
@@ -1102,6 +1805,11 @@ function saveDefaults() {
     webhookSecret = document.getElementById("webhookSecretInput").value.trim();
     localStorage.setItem("wp_webhook_url", webhookUrl);
     localStorage.setItem("wp_webhook_secret", webhookSecret);
+    const wudInput = parseInt(document.getElementById("warmupDurationInput").value, 10);
+    if (!isNaN(wudInput) && wudInput >= 5 && wudInput <= 30) {
+        warmupDurationMins = wudInput;
+        localStorage.setItem("wp_warmup_duration_mins", warmupDurationMins);
+    }
     const presets = DEFAULT_SPEED_PRESETS.map((def, i) => {
         const el = document.getElementById(`speedPreset${i}`);
         const v = el ? parseFloat(el.value) : def;
@@ -1249,6 +1957,11 @@ async function exportStats() {
                         : 0,
                 steps: cumSteps,
                 pauseCount,
+                pauseTimeSeconds: totalPauseTime,
+                sessionStart: sessionStartTime || null,
+                programId: activeProgram?.id ?? null,
+                programName: activeProgram?.name ?? null,
+                programCompleted: programCompletedFlag,
             },
             cumulative: {
                 distance: cumDistance,
@@ -1302,6 +2015,8 @@ async function copyForSheets() {
         "Pace (min/km)",
         "Steps",
         "Pauses",
+        "Program",
+        "Completed",
     ];
     const rows = sessions.map((s) => {
         const dt = new Date(s.date);
@@ -1317,6 +2032,10 @@ async function copyForSheets() {
             ? new Date(s.sessionStart).toLocaleString()
             : "—";
         const avg = s.speedSamples > 0 ? s.speedSum / s.speedSamples : 0;
+        const programCol = s.programName ?? "—";
+        const completedCol = s.programName
+            ? (s.programCompleted ? "Yes" : "No")
+            : "—";
         return [
             s.date,
             week,
@@ -1331,6 +2050,8 @@ async function copyForSheets() {
             fmtPace(avg),
             s.steps || 0,
             s.pauses || 0,
+            programCol,
+            completedCol,
         ];
     });
     const tsv = [header, ...rows].map((r) => r.join("\t")).join("\n");
@@ -1374,6 +2095,9 @@ function saveSessionToHistory() {
         maxSpeed: maxSpeed,
         pauses: deltaPauses,
         steps: deltaSteps,
+        programId:        activeProgram?.id   ?? null,
+        programName:      activeProgram?.name ?? null,
+        programCompleted: programCompletedFlag,
     });
     localStorage.setItem("wp_sessions", JSON.stringify(sessions));
     lastHistoryDistance = cumDistance;
@@ -1616,6 +2340,7 @@ function renderHistoryBySessions() {
         "kcal",
         "Duration",
         "Avg km/h",
+        "Program",
         "Steps",
         "Pauses",
     ].forEach((label, i) => {
@@ -1629,7 +2354,7 @@ function renderHistoryBySessions() {
 
     if (sessions.length === 0) {
         tbody.innerHTML =
-            '<tr><td colspan="8" class="py-4 text-center text-gray-400">No history yet</td></tr>';
+            '<tr><td colspan="9" class="py-4 text-center text-gray-400">No history yet</td></tr>';
         return;
     }
     const fragment = document.createDocumentFragment();
@@ -1678,6 +2403,16 @@ function renderHistoryBySessions() {
         tdSpeed.className = "py-2 font-semibold text-blue-400";
         tdSpeed.textContent = avgSpeed;
 
+        const tdProgram = document.createElement("td");
+        tdProgram.className = "py-2 hidden md:table-cell";
+        if (s.programName) {
+            const badge = s.programCompleted ? " ✓" : " ✗";
+            tdProgram.innerHTML = `<span class="text-xs text-sky-600 dark:text-sky-400 font-medium">${s.programName}</span><span class="text-xs ${s.programCompleted ? "text-green-500" : "text-red-400"}">${badge}</span>`;
+        } else {
+            tdProgram.textContent = "—";
+            tdProgram.className += " text-gray-400";
+        }
+
         const tdSteps = document.createElement("td");
         tdSteps.className =
             "py-2 font-semibold text-sporty hidden md:table-cell";
@@ -1695,6 +2430,7 @@ function renderHistoryBySessions() {
             tdCal,
             tdTime,
             tdSpeed,
+            tdProgram,
             tdSteps,
             tdPauses,
         );
@@ -2255,8 +2991,10 @@ function updateTodayTotals() {
     document.getElementById("todayTime").textContent = fmt(s.time);
     document.getElementById("todayAvgSpeed").textContent =
         s.avgSpeed.toFixed(2);
+    document.getElementById("todayMaxSpd").textContent = s.maxSpd.toFixed(1);
     document.getElementById("todaySessions").textContent = s.sess;
     document.getElementById("todayPauses").textContent = s.pauses;
+    document.getElementById("todaySteps").textContent = Math.round(s.steps).toLocaleString();
     document.getElementById("todayActive").textContent =
         getActiveDays(1) + "/1";
 }
@@ -2278,7 +3016,8 @@ function getPeriodStats(days) {
         spdSamp = 0,
         sess = 0,
         pauses = 0,
-        maxSpd = 0;
+        maxSpd = 0,
+        steps = 0;
     Object.entries(history).forEach(([date, d]) => {
         if (date >= cutoff && date <= today) {
             dist += d.distance || 0;
@@ -2289,6 +3028,7 @@ function getPeriodStats(days) {
             sess += d.sessions || 0;
             pauses += d.pauses || 0;
             maxSpd = Math.max(maxSpd, d.maxSpeed || 0);
+            steps += d.steps || 0;
         }
     });
     // Add current unsaved session delta for today
@@ -2300,9 +3040,10 @@ function getPeriodStats(days) {
         spdSamp += Math.max(0, speedSamples - lastHistorySpeedSamples);
         pauses += Math.max(0, pauseCount - lastHistoryPauseCount);
         maxSpd = Math.max(maxSpd, maxSpeed);
+        steps += Math.max(0, cumSteps - lastHistorySteps);
     }
     const avgSpeed = spdSamp > 0 ? spdSum / spdSamp : 0;
-    return { dist, cal, time, avgSpeed, sess, pauses, maxSpd };
+    return { dist, cal, time, avgSpeed, sess, pauses, maxSpd, steps };
 }
 
 function updatePeriodStats() {
@@ -2321,6 +3062,8 @@ function updatePeriodStats() {
         week.avgSpeed.toFixed(2);
     document.getElementById("weekSessions").textContent = week.sess;
     document.getElementById("weekPauses").textContent = week.pauses;
+    document.getElementById("weekSteps").textContent = Math.round(week.steps).toLocaleString();
+    document.getElementById("weekMaxSpd").textContent = week.maxSpd.toFixed(1);
 
     document.getElementById("monthDist").textContent = month.dist.toFixed(2);
     document.getElementById("monthCal").textContent = Math.round(month.cal);
@@ -2329,6 +3072,8 @@ function updatePeriodStats() {
         month.avgSpeed.toFixed(2);
     document.getElementById("monthSessions").textContent = month.sess;
     document.getElementById("monthPauses").textContent = month.pauses;
+    document.getElementById("monthSteps").textContent = Math.round(month.steps).toLocaleString();
+    document.getElementById("monthMaxSpd").textContent = month.maxSpd.toFixed(1);
 
     document.getElementById("threeMonthDist").textContent =
         threeMonth.dist.toFixed(2);
@@ -2342,6 +3087,8 @@ function updatePeriodStats() {
         threeMonth.avgSpeed.toFixed(2);
     document.getElementById("threeMonthSessions").textContent = threeMonth.sess;
     document.getElementById("threeMonthPauses").textContent = threeMonth.pauses;
+    document.getElementById("threeMonthSteps").textContent = Math.round(threeMonth.steps).toLocaleString();
+    document.getElementById("threeMonthMaxSpd").textContent = threeMonth.maxSpd.toFixed(1);
 
     document.getElementById("sixMonthDist").textContent =
         sixMonth.dist.toFixed(2);
@@ -2353,6 +3100,8 @@ function updatePeriodStats() {
         sixMonth.avgSpeed.toFixed(2);
     document.getElementById("sixMonthSessions").textContent = sixMonth.sess;
     document.getElementById("sixMonthPauses").textContent = sixMonth.pauses;
+    document.getElementById("sixMonthSteps").textContent = Math.round(sixMonth.steps).toLocaleString();
+    document.getElementById("sixMonthMaxSpd").textContent = sixMonth.maxSpd.toFixed(1);
 
     document.getElementById("yearDist").textContent = year.dist.toFixed(2);
     document.getElementById("yearCal").textContent = Math.round(year.cal);
@@ -2361,6 +3110,8 @@ function updatePeriodStats() {
         year.avgSpeed.toFixed(2);
     document.getElementById("yearSessions").textContent = year.sess;
     document.getElementById("yearPauses").textContent = year.pauses;
+    document.getElementById("yearSteps").textContent = Math.round(year.steps).toLocaleString();
+    document.getElementById("yearMaxSpd").textContent = year.maxSpd.toFixed(1);
 
     document.getElementById("weekActive").textContent = getActiveDays(7) + "/7";
     document.getElementById("monthActive").textContent =
@@ -2377,7 +3128,11 @@ function getAllTimeExtras() {
     const history = loadHistory();
     let bestDayDist = 0,
         bestDayDate = null,
-        totalSessions = 0;
+        totalSessions = 0,
+        totalSteps = 0,
+        allTimeSpdSum = 0,
+        allTimeSpdSamp = 0,
+        allTimeMaxSpd = 0;
     let bestAvgSpeed = 0,
         bestAvgSpeedDate = null;
     Object.entries(history).forEach(([date, d]) => {
@@ -2386,18 +3141,36 @@ function getAllTimeExtras() {
             bestDayDate = date;
         }
         totalSessions += d.sessions || 0;
+        totalSteps += d.steps || 0;
+        allTimeSpdSum += d.speedSum || 0;
+        allTimeSpdSamp += d.speedSamples || 0;
+        allTimeMaxSpd = Math.max(allTimeMaxSpd, d.maxSpeed || 0);
         const avg = d.speedSamples > 0 ? d.speedSum / d.speedSamples : 0;
         if (avg > bestAvgSpeed) {
             bestAvgSpeed = avg;
             bestAvgSpeedDate = date;
         }
     });
+    // Add unsaved current session delta
+    totalSteps += Math.max(0, cumSteps - lastHistorySteps);
+    allTimeSpdSum += Math.max(0, speedSum - lastHistorySpeedSum);
+    allTimeSpdSamp += Math.max(0, speedSamples - lastHistorySpeedSamples);
+    allTimeMaxSpd = Math.max(allTimeMaxSpd, maxSpeed);
+    const allTimeAvgSpeed = allTimeSpdSamp > 0 ? allTimeSpdSum / allTimeSpdSamp : 0;
+    const sessions = loadSessions();
+    const programsCompleted = sessions.filter(
+        (s) => s.programCompleted === true,
+    ).length;
     return {
         bestDayDist,
         bestDayDate,
         totalSessions,
+        totalSteps,
+        allTimeAvgSpeed,
+        allTimeMaxSpd,
         bestAvgSpeed,
         bestAvgSpeedDate,
+        programsCompleted,
     };
 }
 
@@ -2449,8 +3222,12 @@ function updateAllTimeExtras() {
         bestDayDist,
         bestDayDate,
         totalSessions,
+        totalSteps,
+        allTimeAvgSpeed,
+        allTimeMaxSpd,
         bestAvgSpeed,
         bestAvgSpeedDate,
+        programsCompleted,
     } = getAllTimeExtras();
     document.getElementById("allTimeBestDay").textContent = bestDayDate
         ? `${bestDayDist.toFixed(2)} km (${bestDayDate})`
@@ -2464,6 +3241,14 @@ function updateAllTimeExtras() {
         bestAvgSpeedDate
             ? `${bestAvgSpeed.toFixed(2)} km/h (${bestAvgSpeedDate})`
             : "—";
+    document.getElementById("allTimeProgramsCompleted").textContent =
+        programsCompleted;
+    document.getElementById("cumSteps").textContent =
+        Math.round(totalSteps).toLocaleString();
+    document.getElementById("cumAvgSpeed").textContent =
+        allTimeAvgSpeed.toFixed(2);
+    document.getElementById("cumMaxSpeed").textContent =
+        allTimeMaxSpd.toFixed(1);
 }
 
 // ============================================================
@@ -2588,13 +3373,12 @@ statsIntervalId = setInterval(() => {
     if (document.getElementById("currentSteps"))
         document.getElementById("currentSteps").textContent = currentSteps;
     cumSteps = estimateSteps(cumEstimatedDistance, userHeightCm);
-    if (document.getElementById("cumSteps"))
-        document.getElementById("cumSteps").textContent = cumSteps;
 
     const powerThisSecond = estimatePower(currentSpeed, userWeight);
     cumPower = powerThisSecond;
     if (isRunning) cumTotalPower += powerThisSecond;
     if (isRunning) updateLiveSpeedChart();
+    tickProgram();
 }, 1000);
 
 // ============================================================
@@ -2647,6 +3431,7 @@ document.getElementById("continueNoBtn").addEventListener("click", () => {
         showStartupIndicator(0);
         return;
     }
+    if (programRunning) cancelProgram();
     saveSessionBackup();
     cumDistance = 0;
     cumCalories = 0;
@@ -2708,21 +3493,25 @@ document.getElementById("resumeBtn").addEventListener("click", () => {
         }
         isPaused = false;
         updateCumulativeStats();
-        pendingResumeSpeed = lastSpeed;
+        pendingResumeSpeed = (programRunning && activeProgram)
+            ? activeProgram.steps[programStepIndex].speed
+            : lastSpeed;
         ftmsCmd([0x07]);
-        showStartupIndicator(lastSpeed);
+        showStartupIndicator(pendingResumeSpeed);
     }
 });
 
 document.getElementById("speedDownBtn").addEventListener("click", () => {
     haptic(30);
     lastSpeed = Math.max(1.0, Math.round(lastSpeed * 10 - 5) / 10);
+    if (programRunning) programUserOverride = true;
     ftmsCmd(ftmsSpeedBytes(lastSpeed));
 });
 
 document.getElementById("speedUpBtn").addEventListener("click", () => {
     haptic(30);
     lastSpeed = Math.min(12.0, Math.round(lastSpeed * 10 + 5) / 10);
+    if (programRunning) programUserOverride = true;
     ftmsCmd(ftmsSpeedBytes(lastSpeed));
 });
 
@@ -2733,6 +3522,7 @@ function startAndSetSpeed(targetSpeed) {
     }
     haptic(30);
     lastSpeed = targetSpeed;
+    if (programRunning) programUserOverride = true;
     if (!isRunning) {
         pendingResumeSpeed = targetSpeed;
         ftmsCmd([0x07]);
@@ -2819,14 +3609,18 @@ document.getElementById("integrationsClearConfirmBtn").addEventListener("click",
 // Integrations — example script generator
 // ============================================================
 const WEBHOOK_FIELDS = [
-    { id: "wf-distance", key: "distance",   label: "distance (km)",   expr: "s.distance" },
-    { id: "wf-calories", key: "calories",   label: "calories",        expr: "s.calories" },
-    { id: "wf-time",     key: "timeSeconds",label: "timeSeconds",     expr: "s.timeSeconds" },
-    { id: "wf-avgSpeed", key: "avgSpeed",   label: "avgSpeed (km/h)", expr: "parseFloat(s.avgSpeed.toFixed(2))" },
-    { id: "wf-maxSpeed", key: "maxSpeed",   label: "maxSpeed (km/h)", expr: "parseFloat(s.maxSpeed.toFixed(1))" },
-    { id: "wf-steps",    key: "steps",      label: "steps",           expr: "s.steps" },
-    { id: "wf-pace",     key: "pace",       label: "pace (min/km)",   expr: "s.pace" },
-    { id: "wf-pauses",   key: "pauseCount", label: "pauseCount",      expr: "s.pauseCount" },
+    { id: "wf-distance",         key: "distance",         label: "distance (km)",     expr: "s.distance" },
+    { id: "wf-calories",         key: "calories",         label: "calories",           expr: "s.calories" },
+    { id: "wf-time",             key: "timeSeconds",      label: "timeSeconds",        expr: "s.timeSeconds" },
+    { id: "wf-avgSpeed",         key: "avgSpeed",         label: "avgSpeed (km/h)",    expr: "parseFloat(s.avgSpeed.toFixed(2))" },
+    { id: "wf-maxSpeed",         key: "maxSpeed",         label: "maxSpeed (km/h)",    expr: "parseFloat(s.maxSpeed.toFixed(1))" },
+    { id: "wf-steps",            key: "steps",            label: "steps",              expr: "s.steps" },
+    { id: "wf-pace",             key: "pace",             label: "pace (min/km)",      expr: "s.pace" },
+    { id: "wf-pauses",           key: "pauseCount",       label: "pauseCount",         expr: "s.pauseCount" },
+    { id: "wf-sessionStart",     key: "sessionStart",     label: "sessionStart",       expr: "s.sessionStart" },
+    { id: "wf-program",          key: "programName",      label: "program",            expr: "s.programName ?? '—'" },
+    { id: "wf-programCompleted", key: "programCompleted", label: "programCompleted",   expr: "s.programName ? (s.programCompleted ? 'Yes' : 'No') : '—'" },
+    { id: "wf-pauseTime",        key: "pauseTimeSeconds", label: "pauseTime (s)",      expr: "s.pauseTimeSeconds" },
 ];
 
 const PAYLOAD_REFERENCE = `{
@@ -2834,14 +3628,19 @@ const PAYLOAD_REFERENCE = `{
   "exportedAt": "string  — ISO 8601 timestamp of the export",
 
   "session": {
-    "distance":    number,  // km, this session
-    "calories":    number,
-    "timeSeconds": number,  // active walk time (excludes pauses)
-    "maxSpeed":    number,  // km/h
-    "avgSpeed":    number,  // km/h (0 if no movement)
-    "pace":        number,  // min/km (0 if speed ≤ 0)
-    "steps":       number,  // estimated from height
-    "pauseCount":  number
+    "distance":         number,  // km, this session
+    "calories":         number,
+    "timeSeconds":      number,  // active walk time (excludes pauses)
+    "maxSpeed":         number,  // km/h
+    "avgSpeed":         number,  // km/h (0 if no movement)
+    "pace":             number,  // min/km (0 if speed ≤ 0)
+    "steps":            number,  // estimated from height
+    "pauseCount":       number,
+    "pauseTimeSeconds": number,  // seconds spent paused this session
+    "sessionStart":     "ISO 8601 | null",  // when belt first started
+    "programId":        "string | null",    // program ID if one was active
+    "programName":      "string | null",    // program display name
+    "programCompleted": boolean             // true if program finished naturally
   },
 
   "cumulative": {
@@ -2858,17 +3657,20 @@ const PAYLOAD_REFERENCE = `{
 
   "sessions": [   // full history — one object per saved session
     {
-      "date":         "YYYY-MM-DD",
-      "savedAt":      "ISO 8601",
-      "sessionStart": "ISO 8601",
-      "distance":     number,
-      "calories":     number,
-      "timeSeconds":  number,
-      "speedSum":     number,
-      "speedSamples": number,
-      "maxSpeed":     number,
-      "pauses":       number,
-      "steps":        number
+      "date":             "YYYY-MM-DD",
+      "savedAt":          "ISO 8601",
+      "sessionStart":     "ISO 8601",
+      "distance":         number,
+      "calories":         number,
+      "timeSeconds":      number,
+      "speedSum":         number,
+      "speedSamples":     number,
+      "maxSpeed":         number,
+      "pauses":           number,
+      "steps":            number,
+      "programId":        "string | null",
+      "programName":      "string | null",
+      "programCompleted": boolean
     }
   ]
 }`;
@@ -3726,6 +4528,69 @@ document
 // Preset buttons are wired dynamically via applySpeedPresets() called from loadDefaults()
 
 // ============================================================
+// Workout Program Event Listeners
+// ============================================================
+
+function openProgramPicker() {
+    document.getElementById("card-programs").classList.remove("hidden");
+}
+
+document.getElementById("programsBtn").addEventListener("click", () => {
+    const card = document.getElementById("card-programs");
+    card.classList.toggle("hidden");
+});
+
+document.getElementById("programsCloseBtn").addEventListener("click", () => {
+    document.getElementById("card-programs").classList.add("hidden");
+});
+
+// Browse button in session card state-1
+document.getElementById("programBrowseBtn").addEventListener("click", openProgramPicker);
+
+// Change button in session card state-2
+document.getElementById("programChangeBtn").addEventListener("click", openProgramPicker);
+
+// Start button in session card state-2 — skips warm-up prompt or auto-starts belt+program
+document.getElementById("programStartBtn").addEventListener("click", () => {
+    if (!activeProgram) return;
+    warmupPromptActive = false;
+    launchOrQueueProgram(activeProgram.id);
+});
+
+document.getElementById("programCancelBtn").addEventListener("click", () => {
+    cancelProgram();
+});
+
+// Program list click — select (with auto-start + warm-up logic) and close picker
+document.getElementById("program-picker-list").addEventListener("click", (e) => {
+    const item = e.target.closest(".program-item");
+    if (!item) return;
+    document.getElementById("card-programs").classList.add("hidden");
+    programPickerSelected(item.dataset.id);
+});
+
+// Warm-up prompt buttons
+document.getElementById("warmupYesBtn").addEventListener("click", () => {
+    if (!activeProgram) return;
+    const targetId = activeProgram.id;
+    launchWarmup(targetId);
+});
+
+document.getElementById("warmupSkipBtn").addEventListener("click", () => {
+    if (!activeProgram) return;
+    warmupPromptActive = false;
+    launchOrQueueProgram(activeProgram.id);
+});
+
+// Category filter pills (event delegation)
+document.getElementById("program-filter-pills").addEventListener("click", (e) => {
+    const pill = e.target.closest(".prog-pill");
+    if (!pill) return;
+    programFilterCategory = pill.dataset.cat;
+    renderProgramPicker();
+});
+
+// ============================================================
 // Init on DOM Ready
 // ============================================================
 
@@ -3744,11 +4609,29 @@ window.addEventListener("DOMContentLoaded", () => {
     updateRecoverBtn();
     updateExportRecoverBtn();
     loadCardState();
+    const savedProgState = loadProgramState();
+    if (savedProgState) {
+        offerProgramResume(savedProgState);
+    } else {
+        const lastPid = localStorage.getItem("wp_last_program_id");
+        if (lastPid) selectProgram(lastPid);
+        else renderProgramPicker();
+    }
     if ("serviceWorker" in navigator)
         navigator.serviceWorker.register("./sw.js");
     document.addEventListener("visibilitychange", () => {
         if (document.visibilityState === "visible" && isRunning)
             requestWakeLock();
+    });
+
+    // Persist session backup and program state before page unloads
+    window.addEventListener("pagehide", () => {
+        if (cumDistance > 0 || speedSamples > 0) saveSessionBackup();
+        saveProgramState();
+    });
+    window.addEventListener("beforeunload", () => {
+        if (cumDistance > 0 || speedSamples > 0) saveSessionBackup();
+        saveProgramState();
     });
     if (window.innerWidth < 768) {
         [
