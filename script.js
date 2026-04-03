@@ -693,11 +693,11 @@ function renderProgramFilterPills() {
     const pillsEl = document.getElementById("program-filter-pills");
     if (!pillsEl) return;
     const catPillCls = {
-        steady_state:   { active: "bg-sky-500 text-white",     inactive: "bg-sky-100 dark:bg-sky-900/40 text-sky-700 dark:text-sky-300 hover:bg-sky-200 dark:hover:bg-sky-900/60" },
-        progressive:    { active: "bg-violet-500 text-white",  inactive: "bg-violet-100 dark:bg-violet-900/40 text-violet-700 dark:text-violet-300 hover:bg-violet-200 dark:hover:bg-violet-900/60" },
-        hiit:           { active: "bg-orange-500 text-white",  inactive: "bg-orange-100 dark:bg-orange-900/40 text-orange-700 dark:text-orange-300 hover:bg-orange-200 dark:hover:bg-orange-900/60" },
-        fat_burn:       { active: "bg-amber-500 text-white",   inactive: "bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 hover:bg-amber-200 dark:hover:bg-amber-900/60" },
-        distance_goals: { active: "bg-emerald-500 text-white", inactive: "bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-200 dark:hover:bg-emerald-900/60" },
+        steady_state:   { active: "bg-cyan-500 text-white",   inactive: "bg-cyan-100 dark:bg-cyan-900/40 text-cyan-700 dark:text-cyan-300 hover:bg-cyan-200 dark:hover:bg-cyan-900/60" },
+        progressive:    { active: "bg-sky-500 text-white",    inactive: "bg-sky-100 dark:bg-sky-900/40 text-sky-700 dark:text-sky-300 hover:bg-sky-200 dark:hover:bg-sky-900/60" },
+        hiit:           { active: "bg-blue-500 text-white",   inactive: "bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 hover:bg-blue-200 dark:hover:bg-blue-900/60" },
+        fat_burn:       { active: "bg-indigo-500 text-white", inactive: "bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-200 dark:hover:bg-indigo-900/60" },
+        distance_goals: { active: "bg-violet-500 text-white", inactive: "bg-violet-100 dark:bg-violet-900/40 text-violet-700 dark:text-violet-300 hover:bg-violet-200 dark:hover:bg-violet-900/60" },
     };
     const allPill = `<button class="prog-pill text-xs font-semibold rounded-full px-2.5 py-1 transition-colors ${programFilterCategory === "all" ? "bg-sky-500 text-white" : "bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600"}" data-cat="all">All</button>`;
     const catPills = PROGRAM_CATEGORIES.map((cat) => {
@@ -723,20 +723,15 @@ function renderProgramPicker() {
         intermediate: "border-l-amber-400 dark:border-l-amber-500",
         advanced:     "border-l-red-400 dark:border-l-red-500",
     };
-    const speedChipCls = {
-        steady_state:   "text-xs bg-sky-100 dark:bg-sky-900/50 text-sky-700 dark:text-sky-300 rounded px-1.5 py-0.5 tabular-nums",
-        progressive:    "text-xs bg-violet-100 dark:bg-violet-900/50 text-violet-700 dark:text-violet-300 rounded px-1.5 py-0.5 tabular-nums",
-        hiit:           "text-xs bg-orange-100 dark:bg-orange-900/50 text-orange-700 dark:text-orange-300 rounded px-1.5 py-0.5 tabular-nums",
-        fat_burn:       "text-xs bg-amber-100 dark:bg-amber-900/50 text-amber-700 dark:text-amber-300 rounded px-1.5 py-0.5 tabular-nums",
-        distance_goals: "text-xs bg-emerald-100 dark:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300 rounded px-1.5 py-0.5 tabular-nums",
-    };
-    const timeCls = "text-xs bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 rounded px-1.5 py-0.5 tabular-nums";
+const timeCls = "text-xs bg-gray-100 dark:bg-gray-600/60 text-gray-600 dark:text-gray-200 rounded px-1.5 py-0.5 tabular-nums";
+    const speedCls = "text-xs bg-sky-100 dark:bg-sky-900/40 text-sky-700 dark:text-sky-300 rounded px-1.5 py-0.5 tabular-nums";
+    const distCls  = "text-xs bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300 rounded px-1.5 py-0.5 tabular-nums";
     const catHeadingCls = {
-        steady_state:   "text-sky-500 dark:text-sky-400",
-        progressive:    "text-violet-500 dark:text-violet-400",
-        hiit:           "text-orange-500 dark:text-orange-400",
-        fat_burn:       "text-amber-500 dark:text-amber-400",
-        distance_goals: "text-emerald-500 dark:text-emerald-400",
+        steady_state:   "text-cyan-400",
+        progressive:    "text-sky-400",
+        hiit:           "text-blue-400",
+        fat_burn:       "text-indigo-400",
+        distance_goals: "text-violet-400",
     };
     let html = "";
     PROGRAM_CATEGORIES.forEach((cat) => {
@@ -759,7 +754,7 @@ function renderProgramPicker() {
             const borderCls = levelBorderCls[p.level] || "border-l-gray-300";
             const selectedCls = isSelected
                 ? "border-sky-400 bg-sky-50 dark:bg-sky-900/30"
-                : "border-gray-200 dark:border-gray-700 hover:border-sky-300 hover:bg-gray-50 dark:hover:bg-gray-700/40";
+                : "bg-white dark:bg-gray-800/60 border-gray-200 dark:border-gray-700 hover:border-sky-300 hover:bg-gray-50 dark:hover:bg-gray-700/50";
             const runBadge = p.requiresRunningMode
                 ? `<span class="text-xs bg-orange-100 text-orange-700 dark:bg-orange-900/60 dark:text-orange-300 rounded px-1 py-0.5 font-medium">Running Mode</span>`
                 : "";
@@ -769,8 +764,8 @@ function renderProgramPicker() {
   <div class="flex items-center gap-1.5 mt-1.5 flex-wrap">
     <span class="text-xs rounded px-1.5 py-0.5 font-medium ${levelBadgeCls[p.level] || ""}">${levelLabel}</span>
     <span class="${timeCls}"><i class="fas fa-clock text-[10px] mr-0.5 opacity-50"></i>${mins} min</span>
-    <span class="${speedChipCls[p.category] || timeCls}"><i class="fas fa-gauge-high text-[10px] mr-0.5 opacity-70"></i>${speedLabel}</span>
-    ${p.approximateDistanceKm ? `<span class="${timeCls}">${p.approximateDistanceKm} km</span>` : ""}
+    <span class="${speedCls}"><i class="fas fa-gauge-high text-[10px] mr-0.5 opacity-70"></i>${speedLabel}</span>
+    ${p.approximateDistanceKm ? `<span class="${distCls}">${p.approximateDistanceKm} km</span>` : ""}
     ${runBadge}
   </div>
 </button>`;
