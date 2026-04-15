@@ -340,6 +340,7 @@ let currentTimeSeconds = 0;
 let cumDistance = 0;
 let cumCalories = 0;
 let cumTimeSeconds = 0;
+let cumMovingTime = 0; // seconds where belt was actually moving (speed > 0)
 let cumPower = 0;
 let cumTotalPower = 0;
 let cumSteps = 0;
@@ -927,6 +928,7 @@ let lastHistoryCalories = 0;
 let lastHistorySpeedSum = 0;
 let lastHistorySpeedSamples = 0;
 let lastHistoryTimeSeconds = 0;
+let lastHistoryMovingTime = 0;
 let lastHistoryPauseCount = 0;
 let lastHistorySteps = 0;
 
@@ -1428,6 +1430,8 @@ function clearCurrentStats() {
     document.getElementById("currentDistance").textContent = "0.00";
     document.getElementById("currentCalories").textContent = "0";
     document.getElementById("currentTime").textContent = "00:00:00";
+    const movingEl = document.getElementById("currentMovingTime");
+    if (movingEl) movingEl.textContent = "00:00:00";
     document.getElementById("currentMaxSpeed").textContent = "0.0";
     document.getElementById("currentAvgSpeed").textContent = "0.00";
     document.getElementById("currentSteps").textContent = "0";
@@ -1449,6 +1453,7 @@ function resetSessionStateAfterStop() {
     cumDistance = 0;
     cumCalories = 0;
     cumTimeSeconds = 0;
+    cumMovingTime = 0;
     cumPower = 0;
     cumTotalPower = 0;
     cumSteps = 0;
@@ -1466,6 +1471,7 @@ function resetSessionStateAfterStop() {
     lastHistorySpeedSum = 0;
     lastHistorySpeedSamples = 0;
     lastHistoryTimeSeconds = 0;
+    lastHistoryMovingTime = 0;
     lastHistoryPauseCount = 0;
     lastHistorySteps = 0;
     liveSpeedData = [];
@@ -1491,6 +1497,14 @@ function updateCurrentStats() {
     )
         .toISOString()
         .slice(11, 19);
+    const movingEl = document.getElementById("currentMovingTime");
+    if (movingEl) {
+        movingEl.textContent = new Date(
+            Math.round(cumMovingTime) * 1000,
+        )
+            .toISOString()
+            .slice(11, 19);
+    }
     document.getElementById("currentMaxSpeed").textContent =
         maxSpeed.toFixed(2);
     let avgSpeed = speedSamples > 0 ? speedSum / speedSamples : 0;
@@ -1560,6 +1574,7 @@ function loadHistory() {
                 speedSum: 0,
                 speedSamples: 0,
                 timeSeconds: 0,
+                movingTime: 0,
                 sessions: 0,
                 pauses: 0,
                 steps: 0,
@@ -1571,6 +1586,8 @@ function loadHistory() {
         history[d].speedSum += s.speedSum || 0;
         history[d].speedSamples += s.speedSamples || 0;
         history[d].timeSeconds += s.timeSeconds || 0;
+        // Fallback for legacy rows lacking movingTime: use timeSeconds as the best proxy.
+        history[d].movingTime += (s.movingTime != null ? s.movingTime : (s.timeSeconds || 0));
         history[d].sessions += 1;
         history[d].pauses += s.pauses || 0;
         history[d].steps += s.steps || 0;
@@ -1586,6 +1603,7 @@ function autoSaveCumulativeStats() {
     localStorage.setItem("wp_cumDistance", cumDistance);
     localStorage.setItem("wp_cumCalories", cumCalories);
     localStorage.setItem("wp_cumTimeSeconds", cumTimeSeconds);
+    localStorage.setItem("wp_cumMovingTime", cumMovingTime);
     localStorage.setItem("wp_cumPauseCount", pauseCount);
     localStorage.setItem("wp_cumTotalPauseTime", totalPauseTime);
     localStorage.setItem("wp_isPaused", isPaused ? "1" : "0");
@@ -1596,6 +1614,7 @@ function autoSaveCumulativeStats() {
     localStorage.setItem("wp_lastHistorySpeedSamples", lastHistorySpeedSamples);
     localStorage.setItem("wp_lastHistoryTimeSeconds", lastHistoryTimeSeconds);
     localStorage.setItem("wp_lastHistoryPauseCount", lastHistoryPauseCount);
+    localStorage.setItem("wp_lastHistoryMovingTime", lastHistoryMovingTime);
     localStorage.setItem("wp_lastHistorySteps", lastHistorySteps);
     localStorage.setItem("wp_cumEstimatedDistance", cumEstimatedDistance);
     localStorage.setItem("wp_maxSpeed", maxSpeed);
@@ -1609,6 +1628,7 @@ function saveSessionBackup() {
         cumDistance,
         cumCalories,
         cumTimeSeconds,
+        cumMovingTime,
         pauseCount,
         totalPauseTime,
         cumTotalPower,
@@ -1768,6 +1788,7 @@ function mergeFromSnapshot(snapshot) {
     cumDistance += snapshot.cumDistance;
     cumCalories += snapshot.cumCalories;
     cumTimeSeconds += snapshot.cumTimeSeconds;
+    cumMovingTime += snapshot.cumMovingTime || 0;
     pauseCount += snapshot.pauseCount;
     totalPauseTime += snapshot.totalPauseTime;
     cumTotalPower += snapshot.cumTotalPower;
@@ -1784,6 +1805,7 @@ function recoverFromSnapshot(snapshot) {
     cumDistance = snapshot.cumDistance;
     cumCalories = snapshot.cumCalories;
     cumTimeSeconds = snapshot.cumTimeSeconds;
+    cumMovingTime = snapshot.cumMovingTime || 0;
     pauseCount = snapshot.pauseCount;
     totalPauseTime = snapshot.totalPauseTime;
     cumTotalPower = snapshot.cumTotalPower;
@@ -1810,6 +1832,7 @@ function loadCumulativeStats() {
     cumDistance = parseFloat(localStorage.getItem("wp_cumDistance")) || 0;
     cumCalories = parseFloat(localStorage.getItem("wp_cumCalories")) || 0;
     cumTimeSeconds = parseInt(localStorage.getItem("wp_cumTimeSeconds")) || 0;
+    cumMovingTime = parseFloat(localStorage.getItem("wp_cumMovingTime")) || 0;
     pauseCount = parseInt(localStorage.getItem("wp_cumPauseCount")) || 0;
     totalPauseTime =
         parseFloat(localStorage.getItem("wp_cumTotalPauseTime")) || 0;
@@ -1832,6 +1855,8 @@ function loadCumulativeStats() {
         parseInt(localStorage.getItem("wp_lastHistoryTimeSeconds")) || 0;
     lastHistoryPauseCount =
         parseInt(localStorage.getItem("wp_lastHistoryPauseCount")) || 0;
+    lastHistoryMovingTime =
+        parseFloat(localStorage.getItem("wp_lastHistoryMovingTime")) || 0;
     lastHistorySteps =
         parseInt(localStorage.getItem("wp_lastHistorySteps")) || 0;
     cumEstimatedDistance =
@@ -1996,6 +2021,7 @@ function saveExportSnapshot() {
         cumDistance,
         cumCalories,
         cumTimeSeconds,
+        cumMovingTime,
         pauseCount,
         totalPauseTime,
         cumTotalPower,
@@ -2248,6 +2274,7 @@ function saveSessionToHistory() {
     const deltaSpeedSum = speedSum - lastHistorySpeedSum;
     const deltaSpeedSamples = speedSamples - lastHistorySpeedSamples;
     const deltaTimeSeconds = cumTimeSeconds - lastHistoryTimeSeconds;
+    const deltaMovingTime = Math.max(0, cumMovingTime - lastHistoryMovingTime);
     const deltaPauses = Math.max(0, pauseCount - lastHistoryPauseCount);
     const deltaSteps = Math.max(0, cumSteps - lastHistorySteps);
     if (deltaDistance <= 0 && deltaSpeedSamples <= 0) return;
@@ -2259,6 +2286,7 @@ function saveSessionToHistory() {
         distance: deltaDistance,
         calories: deltaCalories,
         timeSeconds: Math.max(0, deltaTimeSeconds),
+        movingTime: deltaMovingTime,
         speedSum: deltaSpeedSum,
         speedSamples: deltaSpeedSamples,
         maxSpeed: deltaMaxSpeed || maxSpeed,
@@ -2274,6 +2302,7 @@ function saveSessionToHistory() {
     lastHistorySpeedSum = speedSum;
     lastHistorySpeedSamples = speedSamples;
     lastHistoryTimeSeconds = cumTimeSeconds;
+    lastHistoryMovingTime = cumMovingTime;
     lastHistoryPauseCount = pauseCount;
     lastHistorySteps = cumSteps;
     deltaMaxSpeed = 0;
@@ -3559,6 +3588,9 @@ statsIntervalId = setInterval(() => {
     if (dt > 0) {
         if (speed > 0) {
             cumEstimatedDistance += speed * dt;
+            if (isRunning && !isPaused) {
+                cumMovingTime += dt * 3600; // dt is hours; convert to seconds
+            }
         }
         lastDistanceUpdate = now;
     }
@@ -3635,6 +3667,7 @@ document.getElementById("continueNoBtn").addEventListener("click", () => {
     cumDistance = 0;
     cumCalories = 0;
     cumTimeSeconds = 0;
+    cumMovingTime = 0;
     pauseCount = 0;
     totalPauseTime = 0;
     cumTotalPower = 0;
@@ -3651,6 +3684,7 @@ document.getElementById("continueNoBtn").addEventListener("click", () => {
     lastHistorySpeedSum = 0;
     lastHistorySpeedSamples = 0;
     lastHistoryTimeSeconds = 0;
+    lastHistoryMovingTime = 0;
     lastHistoryPauseCount = 0;
     lastHistorySteps = 0;
     cumSteps = 0;
