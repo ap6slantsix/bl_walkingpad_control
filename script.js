@@ -1345,8 +1345,9 @@ function updateCurrentStats() {
         .toISOString()
         .slice(11, 19);
     document.getElementById("currentMaxSpeed").textContent =
-        maxSpeed.toFixed(1);
-    const avgSpeed = speedSamples > 0 ? speedSum / speedSamples : 0;
+        maxSpeed.toFixed(2);
+    let avgSpeed = speedSamples > 0 ? speedSum / speedSamples : 0;
+    if (maxSpeed > 0 && avgSpeed > maxSpeed) avgSpeed = maxSpeed;
     document.getElementById("currentAvgSpeed").textContent =
         avgSpeed.toFixed(2);
     document.getElementById("currentSteps").textContent = currentSteps;
@@ -1426,7 +1427,9 @@ function loadHistory() {
         history[d].sessions += 1;
         history[d].pauses += s.pauses || 0;
         history[d].steps += s.steps || 0;
-        history[d].maxSpeed = Math.max(history[d].maxSpeed, s.maxSpeed || 0);
+        const rowMax = s.maxSpeed
+            || (s.speedSamples > 0 ? s.speedSum / s.speedSamples : 0);
+        history[d].maxSpeed = Math.max(history[d].maxSpeed, rowMax);
         history[d].lastUpdated = s.savedAt;
     });
     return history;
@@ -1448,6 +1451,9 @@ function autoSaveCumulativeStats() {
     localStorage.setItem("wp_lastHistoryPauseCount", lastHistoryPauseCount);
     localStorage.setItem("wp_lastHistorySteps", lastHistorySteps);
     localStorage.setItem("wp_cumEstimatedDistance", cumEstimatedDistance);
+    localStorage.setItem("wp_maxSpeed", maxSpeed);
+    localStorage.setItem("wp_speedSum", speedSum);
+    localStorage.setItem("wp_speedSamples", speedSamples);
 }
 
 function saveSessionBackup() {
@@ -1667,6 +1673,9 @@ function loadCumulativeStats() {
         parseInt(localStorage.getItem("wp_lastHistorySteps")) || 0;
     cumEstimatedDistance =
         parseFloat(localStorage.getItem("wp_cumEstimatedDistance")) || 0;
+    maxSpeed = parseFloat(localStorage.getItem("wp_maxSpeed")) || 0;
+    speedSum = parseFloat(localStorage.getItem("wp_speedSum")) || 0;
+    speedSamples = parseInt(localStorage.getItem("wp_speedSamples")) || 0;
 }
 
 const DEFAULT_SPEED_PRESETS = [3.5, 4.5, 5.5, 6.5, 7.5, 8.5];
@@ -2986,7 +2995,7 @@ function updateTodayTotals() {
     document.getElementById("todayTime").textContent = fmt(s.time);
     document.getElementById("todayAvgSpeed").textContent =
         s.avgSpeed.toFixed(2);
-    document.getElementById("todayMaxSpd").textContent = s.maxSpd.toFixed(1);
+    document.getElementById("todayMaxSpd").textContent = s.maxSpd.toFixed(2);
     document.getElementById("todaySessions").textContent = s.sess;
     document.getElementById("todayPauses").textContent = s.pauses;
     document.getElementById("todaySteps").textContent = Math.round(s.steps).toLocaleString();
@@ -3028,16 +3037,20 @@ function getPeriodStats(days) {
     });
     // Add current unsaved session delta for today
     if (today >= cutoff) {
-        dist += Math.max(0, cumDistance - lastHistoryDistance);
+        const dDist = Math.max(0, cumDistance - lastHistoryDistance);
+        const dSamp = Math.max(0, speedSamples - lastHistorySpeedSamples);
+        dist += dDist;
         cal += Math.max(0, cumCalories - lastHistoryCalories);
         time += Math.max(0, cumTimeSeconds - lastHistoryTimeSeconds);
         spdSum += Math.max(0, speedSum - lastHistorySpeedSum);
-        spdSamp += Math.max(0, speedSamples - lastHistorySpeedSamples);
+        spdSamp += dSamp;
         pauses += Math.max(0, pauseCount - lastHistoryPauseCount);
         maxSpd = Math.max(maxSpd, maxSpeed);
         steps += Math.max(0, cumSteps - lastHistorySteps);
+        if (dDist > 0 || dSamp > 0) sess += 1;
     }
-    const avgSpeed = spdSamp > 0 ? spdSum / spdSamp : 0;
+    let avgSpeed = spdSamp > 0 ? spdSum / spdSamp : 0;
+    if (maxSpd > 0 && avgSpeed > maxSpd) avgSpeed = maxSpd;
     return { dist, cal, time, avgSpeed, sess, pauses, maxSpd, steps };
 }
 
@@ -3058,7 +3071,7 @@ function updatePeriodStats() {
     document.getElementById("weekSessions").textContent = week.sess;
     document.getElementById("weekPauses").textContent = week.pauses;
     document.getElementById("weekSteps").textContent = Math.round(week.steps).toLocaleString();
-    document.getElementById("weekMaxSpd").textContent = week.maxSpd.toFixed(1);
+    document.getElementById("weekMaxSpd").textContent = week.maxSpd.toFixed(2);
 
     document.getElementById("monthDist").textContent = month.dist.toFixed(2);
     document.getElementById("monthCal").textContent = Math.round(month.cal);
@@ -3068,7 +3081,7 @@ function updatePeriodStats() {
     document.getElementById("monthSessions").textContent = month.sess;
     document.getElementById("monthPauses").textContent = month.pauses;
     document.getElementById("monthSteps").textContent = Math.round(month.steps).toLocaleString();
-    document.getElementById("monthMaxSpd").textContent = month.maxSpd.toFixed(1);
+    document.getElementById("monthMaxSpd").textContent = month.maxSpd.toFixed(2);
 
     document.getElementById("threeMonthDist").textContent =
         threeMonth.dist.toFixed(2);
@@ -3083,7 +3096,7 @@ function updatePeriodStats() {
     document.getElementById("threeMonthSessions").textContent = threeMonth.sess;
     document.getElementById("threeMonthPauses").textContent = threeMonth.pauses;
     document.getElementById("threeMonthSteps").textContent = Math.round(threeMonth.steps).toLocaleString();
-    document.getElementById("threeMonthMaxSpd").textContent = threeMonth.maxSpd.toFixed(1);
+    document.getElementById("threeMonthMaxSpd").textContent = threeMonth.maxSpd.toFixed(2);
 
     document.getElementById("sixMonthDist").textContent =
         sixMonth.dist.toFixed(2);
@@ -3096,7 +3109,7 @@ function updatePeriodStats() {
     document.getElementById("sixMonthSessions").textContent = sixMonth.sess;
     document.getElementById("sixMonthPauses").textContent = sixMonth.pauses;
     document.getElementById("sixMonthSteps").textContent = Math.round(sixMonth.steps).toLocaleString();
-    document.getElementById("sixMonthMaxSpd").textContent = sixMonth.maxSpd.toFixed(1);
+    document.getElementById("sixMonthMaxSpd").textContent = sixMonth.maxSpd.toFixed(2);
 
     document.getElementById("yearDist").textContent = year.dist.toFixed(2);
     document.getElementById("yearCal").textContent = Math.round(year.cal);
@@ -3106,7 +3119,7 @@ function updatePeriodStats() {
     document.getElementById("yearSessions").textContent = year.sess;
     document.getElementById("yearPauses").textContent = year.pauses;
     document.getElementById("yearSteps").textContent = Math.round(year.steps).toLocaleString();
-    document.getElementById("yearMaxSpd").textContent = year.maxSpd.toFixed(1);
+    document.getElementById("yearMaxSpd").textContent = year.maxSpd.toFixed(2);
 
     document.getElementById("weekActive").textContent = getActiveDays(7) + "/7";
     document.getElementById("monthActive").textContent =
@@ -3147,11 +3160,15 @@ function getAllTimeExtras() {
         }
     });
     // Add unsaved current session delta
+    const liveDist = Math.max(0, cumDistance - lastHistoryDistance);
+    const liveSamp = Math.max(0, speedSamples - lastHistorySpeedSamples);
     totalSteps += Math.max(0, cumSteps - lastHistorySteps);
     allTimeSpdSum += Math.max(0, speedSum - lastHistorySpeedSum);
-    allTimeSpdSamp += Math.max(0, speedSamples - lastHistorySpeedSamples);
+    allTimeSpdSamp += liveSamp;
     allTimeMaxSpd = Math.max(allTimeMaxSpd, maxSpeed);
-    const allTimeAvgSpeed = allTimeSpdSamp > 0 ? allTimeSpdSum / allTimeSpdSamp : 0;
+    if (liveDist > 0 || liveSamp > 0) totalSessions += 1;
+    let allTimeAvgSpeed = allTimeSpdSamp > 0 ? allTimeSpdSum / allTimeSpdSamp : 0;
+    if (allTimeMaxSpd > 0 && allTimeAvgSpeed > allTimeMaxSpd) allTimeAvgSpeed = allTimeMaxSpd;
     const sessions = loadSessions();
     const programsCompleted = sessions.filter(
         (s) => s.programCompleted === true,
@@ -3243,7 +3260,7 @@ function updateAllTimeExtras() {
     document.getElementById("cumAvgSpeed").textContent =
         allTimeAvgSpeed.toFixed(2);
     document.getElementById("cumMaxSpeed").textContent =
-        allTimeMaxSpd.toFixed(1);
+        allTimeMaxSpd.toFixed(2);
 }
 
 // ============================================================
