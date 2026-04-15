@@ -1060,13 +1060,13 @@
                 </div>
                 <div class="flex items-center gap-3">
                     <label class="text-sporty font-semibold w-28 text-right text-sm shrink-0">Height</label>
-                    <div class="flex items-center gap-2 flex-1">
-                        <div id="onboardingHeightFtInInputs" class="flex items-center gap-1 flex-1">
+                    <div class="flex items-center gap-2 flex-1 min-w-0">
+                        <div id="onboardingHeightFtInInputs" class="flex items-center gap-1 flex-1 min-w-0">
                             <input id="onboardingHeightFt" type="number" min="3" max="8" placeholder="5" autocomplete="off"
-                                class="bg-gray-100 dark:bg-gray-900 text-gray-900 dark:text-white rounded px-3 py-2 w-20 border border-sporty text-lg text-center" />
+                                class="bg-gray-100 dark:bg-gray-900 text-gray-900 dark:text-white rounded px-1 py-2 w-12 border border-sporty text-lg text-center" />
                             <span class="text-sm text-gray-500 dark:text-gray-400">ft</span>
                             <input id="onboardingHeightIn" type="number" min="0" max="11" placeholder="11" autocomplete="off"
-                                class="bg-gray-100 dark:bg-gray-900 text-gray-900 dark:text-white rounded px-3 py-2 w-20 border border-sporty text-lg text-center" />
+                                class="bg-gray-100 dark:bg-gray-900 text-gray-900 dark:text-white rounded px-1 py-2 w-12 border border-sporty text-lg text-center" />
                             <span class="text-sm text-gray-500 dark:text-gray-400">in</span>
                         </div>
                         <div id="onboardingHeightCmInputs" class="items-center gap-1 flex-1 hidden">
@@ -1693,6 +1693,20 @@
                     class="bg-gray-400 hover:bg-gray-500 text-white font-semibold py-2 px-6 rounded shadow">Close</button>
             </div>
         </div>
+    </div>
+
+    <!-- Program Complete Toast -->
+    <div id="programCompleteToast"
+        class="hidden fixed top-20 left-1/2 -translate-x-1/2 z-50 bg-green-600 text-white rounded-xl shadow-2xl px-5 py-3 items-center gap-3 border-2 border-green-400 animate-pulse">
+        <i class="fas fa-flag-checkered text-2xl"></i>
+        <div>
+            <div class="text-xs font-bold uppercase tracking-widest opacity-90">Program Complete</div>
+            <div id="programCompleteToastName" class="text-base font-semibold"></div>
+        </div>
+        <button onclick="document.getElementById('programCompleteToast').classList.add('hidden')"
+            class="ml-2 text-white/80 hover:text-white" aria-label="Dismiss">
+            <i class="fas fa-times"></i>
+        </button>
     </div>
 
     <!-- Startup Procedure Indicator -->

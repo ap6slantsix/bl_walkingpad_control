@@ -212,6 +212,7 @@ let isRunning = false;
 let isPaused = false;
 let historyView = "day"; // "day" or "session"
 let lastSpeed = 1.0;
+let pendingConnectBeep = false;
 let isConnected = false;
 let reconnectAttempts = 0;
 let reconnectTimer = null;
@@ -648,6 +649,15 @@ function tickProgram() {
             programCompletedFlag = true;
             clearProgramState();
             haptic([100, 50, 100, 50, 200]);
+            padBeepAlert();
+            showProgramCompleteToast(activeProgram?.name);
+            // Cooldown: drop belt to 1.0 km/h so user can step off safely.
+            // Skip if auto-chaining — the next program will set its own speed.
+            if (!pendingProgramId) {
+                const cooldownSpeed = 1.0;
+                lastSpeed = cooldownSpeed;
+                setTimeout(() => ftmsCmd(ftmsSpeedBytes(cooldownSpeed)), 400);
+            }
             const chainId = pendingProgramId;
             pendingProgramId = null;
             renderProgramSection();
@@ -977,6 +987,47 @@ async function ftmsCmd(bytes) {
 }
 
 // ============================================================
+// Program Complete Toast
+// ============================================================
+let programToastTimer = null;
+function showProgramCompleteToast(programName) {
+    const el = document.getElementById("programCompleteToast");
+    if (!el) return;
+    const nameEl = document.getElementById("programCompleteToastName");
+    if (nameEl) nameEl.textContent = programName || "Program";
+    el.classList.remove("hidden");
+    el.classList.add("flex");
+    clearTimeout(programToastTimer);
+    programToastTimer = setTimeout(() => {
+        el.classList.add("hidden");
+        el.classList.remove("flex");
+    }, 8000);
+}
+
+// ============================================================
+// Walking Pad Beep Alert
+// ============================================================
+// Two rapid Speed=0 writes trigger two quick beeps from the pad's firmware.
+// The value is rejected as out-of-range so the belt doesn't change speed.
+async function padBeepAlert(count = 2) {
+    if (!cFTMSControl) return;
+    // Each Set-Speed write triggers an ack beep from the pad firmware. Sending
+    // the *actual* current speed (from treadmill notifications, not our command
+    // target) means the value matches reality so the belt keeps running
+    // unchanged. Using lastSpeed or 0 here would override the real speed.
+    const kmh = currentSpeed || 0;
+    const v = Math.round(kmh * 100);
+    const bytes = new Uint8Array([0x02, v & 0xff, (v >> 8) & 0xff]);
+    try {
+        for (let i = 0; i < count; i++) {
+            await cFTMSControl.writeValue(bytes);
+        }
+    } catch (e) {
+        console.warn("[BeepAlert] write failed", e);
+    }
+}
+
+// ============================================================
 // FTMS Notification Handlers
 // ============================================================
 
@@ -1020,6 +1071,15 @@ function handleFTMSTreadmill(event) {
                 labels[Math.min(startupBeltPackets - 1, labels.length - 1)];
             setStartupStep("step-belt", "active", label);
         }
+    }
+
+    // Fire the deferred connect beep on the first notification after connect,
+    // regardless of whether the belt is running. currentSpeed is set below; use
+    // the local `speed` value directly so padBeepAlert picks it up correctly.
+    if (pendingConnectBeep) {
+        pendingConnectBeep = false;
+        currentSpeed = speed; // ensure padBeepAlert reads the right value
+        setTimeout(() => padBeepAlert(1), 300);
     }
 
     // Only accumulate stats when belt is actually running at speed
@@ -1209,6 +1269,10 @@ async function connectToDevice() {
     setStatus("Connected", "bg-green-500");
     // Request FTMS control after a short delay to let the pad settle
     setTimeout(() => ftmsCmd([0x01]), 600);
+    // Audible confirmation — single beep once we've seen a real speed reading.
+    // Waiting for the first treadmill data notification avoids accidentally
+    // sending speed=0 to a belt that's already running (which would stop it).
+    pendingConnectBeep = true;
     // If a program was running, re-send current step speed after reconnect settle time
     if (programRunning && activeProgram) {
         const step = activeProgram.steps[programStepIndex];
@@ -1231,7 +1295,31 @@ async function initBLE() {
             console.log("[BLE] User selected:", device.id, device.name);
             device.addEventListener("gattserverdisconnected", onDisconnected);
         }
-        await connectToDevice();
+        // Retry connectToDevice a few times — Chrome Web Bluetooth frequently
+        // fails partway through service/characteristic discovery on first attempt.
+        let lastErr = null;
+        for (let attempt = 1; attempt <= 3; attempt++) {
+            try {
+                await connectToDevice();
+                lastErr = null;
+                break;
+            } catch (e) {
+                lastErr = e;
+                console.warn(`[BLE] initBLE connect attempt ${attempt}/3 failed:`, e.message);
+                // Tear down any partial state so next attempt starts clean
+                isConnected = false;
+                try { if (device?.gatt?.connected) device.gatt.disconnect(); } catch {}
+                ftmsService = null;
+                cFTMSControl = null;
+                cFTMSTreadmill = null;
+                cFTMSStatus = null;
+                if (attempt < 3) {
+                    setStatus("Retrying…", "bg-yellow-400");
+                    await new Promise(r => setTimeout(r, 800));
+                }
+            }
+        }
+        if (lastErr) throw lastErr;
     } catch (e) {
         if (e.name === "NotFoundError") {
             console.log("[BLE] User cancelled picker");
@@ -1239,6 +1327,8 @@ async function initBLE() {
         } else {
             console.error("[BLE] initBLE failed:", e);
             setStatus("Connection failed", "bg-red-500");
+            // Fall back to the reconnect schedule so user doesn't have to click again
+            if (device) scheduleReconnect();
         }
     }
 }
@@ -1605,7 +1695,20 @@ function offerProgramResume(ps) {
 
     document.getElementById("prog-resume-confirm").addEventListener("click", () => {
         banner.remove();
-        clearProgramState();
+        // Actually resume: if belt is running, start the program at the saved
+        // step; otherwise queue it and kick off the belt so it auto-starts
+        // once we're moving (via pendingProgramId handling in the treadmill
+        // notification handler).
+        if (!activeProgram) return;
+        const step = activeProgram.steps[programStepIndex];
+        if (isRunning) {
+            startProgram();
+        } else {
+            pendingProgramId = activeProgram.id;
+            pendingResumeSpeed = step ? step.speed : 1.0;
+            ftmsCmd([0x07]);
+            showStartupIndicator(pendingResumeSpeed);
+        }
         renderProgramSection();
         renderProgramPicker();
     });
