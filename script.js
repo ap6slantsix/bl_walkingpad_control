@@ -369,7 +369,9 @@ let currentPower = 0;
 let currentSteps = 0;
 
 // --- Estimated Distance (speed-integration) ---
-let estimatedDistanceKm = 0;
+// cumEstimatedDistance integrates speed × dt between pad packets so the step
+// counter ramps smoothly; it is snapped to authoritative cumDistance on every
+// pad packet (see handleFTMSTreadmill) and resets with each session.
 let cumEstimatedDistance = 0;
 let lastDistanceUpdate = Date.now();
 
@@ -1110,7 +1112,6 @@ function handleFTMSStatus(event) {
         // Belt fully stopped — pad resets its internal counters to 0 at this point
         isRunning = false;
         currentSpeed = 0;
-        estimatedDistanceKm = 0;
         lastDistanceUpdate = Date.now();
         // Reset prev values so next session's first packet doesn't produce a negative delta
         prevDistance = 0;
@@ -1302,7 +1303,8 @@ function ftInToCm(ft, inches) {
 
 function getStrideLength(heightCm) {
     if (!heightCm || heightCm <= 0) return 0.762;
-    return (0.415 * heightCm) / 100;
+    // Walking stride coefficient (running-pace 0.415 overestimates step count).
+    return (0.413 * heightCm) / 100;
 }
 
 function estimateSteps(distanceKm, heightCm) {
@@ -1342,7 +1344,6 @@ function clearCurrentStats() {
     document.getElementById("currentPauses").textContent = "0";
     currentSteps = 0;
     cumSteps = 0;
-    estimatedDistanceKm = 0;
     cumEstimatedDistance = 0;
     sessionStartTime = null;
     document.getElementById("currentPace").textContent = "—";
@@ -3231,7 +3232,9 @@ function getAllTimeExtras() {
         allTimeSpdSamp += d.speedSamples || 0;
         allTimeMaxSpd = Math.max(allTimeMaxSpd, d.maxSpeed || 0);
         const avg = d.speedSamples > 0 ? d.speedSum / d.speedSamples : 0;
-        if (avg > bestAvgSpeed) {
+        // Require a meaningful walking window (~2 min) before a day qualifies,
+        // so a 30-second fast burst doesn't beat a real workout.
+        if (d.speedSamples >= 120 && avg > bestAvgSpeed) {
             bestAvgSpeed = avg;
             bestAvgSpeedDate = date;
         }
@@ -3452,7 +3455,6 @@ statsIntervalId = setInterval(() => {
 
     if (dt > 0) {
         if (speed > 0) {
-            estimatedDistanceKm += speed * dt;
             cumEstimatedDistance += speed * dt;
         }
         lastDistanceUpdate = now;
@@ -3487,7 +3489,12 @@ document.getElementById("startBtn").addEventListener("click", () => {
         showStartupIndicator(0);
         return;
     }
-    const hasPreviousStats = cumDistance > 0 || cumTimeSeconds > 0 || cumCalories > 0;
+    const hasPreviousStats =
+        cumDistance > 0 ||
+        cumTimeSeconds > 0 ||
+        cumCalories > 0 ||
+        pauseCount > 0 ||
+        speedSamples > 0;
     if (hasPreviousStats) {
         showContinueModal();
     } else {
@@ -3532,7 +3539,6 @@ document.getElementById("continueNoBtn").addEventListener("click", () => {
     speedSum = 0;
     speedSamples = 0;
     deltaMaxSpeed = 0;
-    estimatedDistanceKm = 0;
     cumEstimatedDistance = 0;
     liveSpeedData = [];
     liveSpeedLabels = [];
