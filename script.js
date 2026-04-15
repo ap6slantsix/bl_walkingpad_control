@@ -2280,6 +2280,7 @@ function renderHistoryByDay() {
         "kcal",
         "Time",
         "Avg km/h",
+        "Max km/h",
         "Steps",
         "Sessions",
         "Pauses",
@@ -2294,7 +2295,7 @@ function renderHistoryByDay() {
 
     if (dates.length === 0) {
         tbody.innerHTML =
-            '<tr><td colspan="8" class="py-4 text-center text-gray-400">No history yet</td></tr>';
+            '<tr><td colspan="9" class="py-4 text-center text-gray-400">No history yet</td></tr>';
         return;
     }
     // Build set of streak dates for fire indicators
@@ -2358,6 +2359,11 @@ function renderHistoryByDay() {
         tdSpeed.className = "py-2 font-semibold text-blue-400";
         tdSpeed.textContent = avgSpeed;
 
+        const tdMax = document.createElement("td");
+        tdMax.className =
+            "py-2 font-semibold text-red-400 hidden md:table-cell";
+        tdMax.textContent = (d.maxSpeed || 0).toFixed(2);
+
         const tdSteps = document.createElement("td");
         tdSteps.className =
             "py-2 font-semibold text-sporty hidden md:table-cell";
@@ -2379,6 +2385,7 @@ function renderHistoryByDay() {
             tdCal,
             tdTime,
             tdSpeed,
+            tdMax,
             tdSteps,
             tdSessions,
             tdPauses,
@@ -2406,6 +2413,7 @@ function renderHistoryBySessions() {
         "kcal",
         "Duration",
         "Avg km/h",
+        "Max km/h",
         "Program",
         "Steps",
         "Pauses",
@@ -2420,15 +2428,16 @@ function renderHistoryBySessions() {
 
     if (sessions.length === 0) {
         tbody.innerHTML =
-            '<tr><td colspan="9" class="py-4 text-center text-gray-400">No history yet</td></tr>';
+            '<tr><td colspan="10" class="py-4 text-center text-gray-400">No history yet</td></tr>';
         return;
     }
     const fragment = document.createDocumentFragment();
     sessions.forEach((s) => {
-        const avgSpeed =
-            s.speedSamples > 0
-                ? (s.speedSum / s.speedSamples).toFixed(2)
-                : "0.00";
+        const avgVal =
+            s.speedSamples > 0 ? s.speedSum / s.speedSamples : 0;
+        const rowMax = s.maxSpeed || avgVal; // backfill legacy rows missing maxSpeed
+        const avgSpeed = avgVal.toFixed(2);
+        const maxSpeedStr = rowMax.toFixed(2);
         const steps = (s.steps || 0).toLocaleString();
         const timeStr =
             s.timeSeconds > 0
@@ -2469,6 +2478,11 @@ function renderHistoryBySessions() {
         tdSpeed.className = "py-2 font-semibold text-blue-400";
         tdSpeed.textContent = avgSpeed;
 
+        const tdMax = document.createElement("td");
+        tdMax.className =
+            "py-2 font-semibold text-red-400 hidden md:table-cell";
+        tdMax.textContent = maxSpeedStr;
+
         const tdProgram = document.createElement("td");
         tdProgram.className = "py-2 hidden md:table-cell";
         if (s.programName) {
@@ -2496,6 +2510,7 @@ function renderHistoryBySessions() {
             tdCal,
             tdTime,
             tdSpeed,
+            tdMax,
             tdProgram,
             tdSteps,
             tdPauses,
