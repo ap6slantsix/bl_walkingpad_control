@@ -1311,6 +1311,15 @@ function estimateSteps(distanceKm, heightCm) {
     return Math.round((distanceKm * 1000) / stride);
 }
 
+// YYYY-MM-DD in the user's local timezone. Canonical date key for session rows,
+// streaks, and period cutoffs so they match the calendar day the user sees.
+function localDateKey(d = new Date()) {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${day}`;
+}
+
 function formatSeconds(sec) {
     sec = Math.round(sec);
     const m = Math.floor(sec / 60);
@@ -2074,7 +2083,8 @@ async function copyForSheets() {
         "Completed",
     ];
     const rows = sessions.map((s) => {
-        const dt = new Date(s.date);
+        // Parse as local midnight so week/month/year reflect the stored local day.
+        const dt = new Date(s.date + "T00:00:00");
         const week = Math.ceil(
             ((dt - new Date(dt.getFullYear(), 0, 1)) / 86400000 + 1) / 7,
         );
@@ -2139,7 +2149,7 @@ function saveSessionToHistory() {
     if (deltaDistance <= 0 && deltaSpeedSamples <= 0) return;
     const sessions = loadSessions();
     sessions.push({
-        date: new Date().toISOString().slice(0, 10),
+        date: localDateKey(),
         savedAt: new Date().toISOString(),
         sessionStart: sessionStartTime || new Date().toISOString(),
         distance: deltaDistance,
@@ -2289,14 +2299,14 @@ function renderHistoryByDay() {
     }
     // Build set of streak dates for fire indicators
     const streakDates = new Set();
-    const todayKey = new Date().toISOString().slice(0, 10);
+    const todayKey = localDateKey();
     const todayActive =
         (history[todayKey] && (history[todayKey].distance || 0) > 0) ||
         cumDistance > 0;
     const sd = new Date();
     if (!todayActive) sd.setDate(sd.getDate() - 1);
     for (let i = 0; i < 365; i++) {
-        const key = sd.toISOString().slice(0, 10);
+        const key = localDateKey(sd);
         const active =
             key === todayKey
                 ? todayActive
@@ -3061,10 +3071,10 @@ function updateTodayTotals() {
 
 function getPeriodStats(days) {
     const history = loadHistory();
-    const today = new Date().toISOString().slice(0, 10);
-    const cutoff = new Date(Date.now() - (days - 1) * 86400000)
-        .toISOString()
-        .slice(0, 10);
+    const today = localDateKey();
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - (days - 1));
+    const cutoff = localDateKey(cutoffDate);
     let dist = 0,
         cal = 0,
         time = 0,
@@ -3240,7 +3250,7 @@ function getAllTimeExtras() {
 
 function getStreak() {
     const history = loadHistory();
-    const todayKey = new Date().toISOString().slice(0, 10);
+    const todayKey = localDateKey();
     const todayActive =
         (history[todayKey] && (history[todayKey].distance || 0) > 0) ||
         cumDistance > 0;
@@ -3248,7 +3258,7 @@ function getStreak() {
     if (!todayActive) d.setDate(d.getDate() - 1);
     let streak = 0;
     while (streak < 365) {
-        const key = d.toISOString().slice(0, 10);
+        const key = localDateKey(d);
         const active =
             key === todayKey
                 ? todayActive
@@ -3263,14 +3273,14 @@ function getStreak() {
 
 function getActiveDays(days) {
     const history = loadHistory();
-    const todayKey = new Date().toISOString().slice(0, 10);
+    const todayKey = localDateKey();
     const todayActive =
         (history[todayKey] && (history[todayKey].distance || 0) > 0) ||
         cumDistance > 0;
     let count = 0;
     const d = new Date();
     for (let i = 0; i < days; i++) {
-        const key = d.toISOString().slice(0, 10);
+        const key = localDateKey(d);
         const active =
             key === todayKey
                 ? todayActive
