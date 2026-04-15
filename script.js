@@ -344,9 +344,11 @@ let cumTotalPower = 0;
 let cumSteps = 0;
 
 // --- Speed Tracking ---
+const MAX_REALISTIC_SPEED = 20; // km/h; discard obviously malformed FTMS packets
 let maxSpeed = 0;
 let speedSum = 0;
 let speedSamples = 0;
+let deltaMaxSpeed = 0; // max within the current save-to-history delta window
 
 // --- Pause Tracking ---
 let pauseCount = 0;
@@ -1055,9 +1057,12 @@ function handleFTMSTreadmill(event) {
     }
 
     currentSpeed = speed;
-    if (currentSpeed > maxSpeed) maxSpeed = currentSpeed;
-    speedSum += currentSpeed;
-    speedSamples++;
+    if (currentSpeed > 0 && currentSpeed <= MAX_REALISTIC_SPEED) {
+        if (currentSpeed > maxSpeed) maxSpeed = currentSpeed;
+        if (currentSpeed > deltaMaxSpeed) deltaMaxSpeed = currentSpeed;
+        speedSum += currentSpeed;
+        speedSamples++;
+    }
 
     currentDistance = distance;
     currentCalories = calories;
@@ -1066,6 +1071,9 @@ function handleFTMSTreadmill(event) {
     cumDistance += Math.max(0, currentDistance - prevDistance);
     cumCalories += Math.max(0, currentCalories - prevCalories);
     cumTimeSeconds += Math.max(0, currentTimeSeconds - prevTimeSeconds);
+    // Dead-reckoning snap: anchor the integrated value to the pad's authoritative
+    // distance on every packet, so steps stay smooth between packets but never drift.
+    cumEstimatedDistance = cumDistance;
 
     prevDistance = currentDistance;
     prevCalories = currentCalories;
@@ -1119,7 +1127,10 @@ function handleFTMSStatus(event) {
             if (programRunning) cancelProgram();
             updateProgramStartBtnState();
             updateCurrentStats();
-            exportStats().then(() => clearCurrentStats());
+            exportStats().then(() => {
+                clearCurrentStats();
+                resetSessionStateAfterStop();
+            });
             return;
         }
         updateCurrentStats();
@@ -1331,6 +1342,42 @@ function clearCurrentStats() {
     if (mobileSpeedEl) mobileSpeedEl.textContent = "0.0";
 }
 
+// Called after a clean stop has been exported + persisted to history.
+// Zeroes cumulative session state so the next workout (whether launched via
+// startBtn or the program picker) starts from a clean slate.
+function resetSessionStateAfterStop() {
+    cumDistance = 0;
+    cumCalories = 0;
+    cumTimeSeconds = 0;
+    cumPower = 0;
+    cumTotalPower = 0;
+    cumSteps = 0;
+    cumEstimatedDistance = 0;
+    maxSpeed = 0;
+    speedSum = 0;
+    speedSamples = 0;
+    deltaMaxSpeed = 0;
+    pauseCount = 0;
+    totalPauseTime = 0;
+    pauseStartTimestamp = null;
+    isPaused = false;
+    lastHistoryDistance = 0;
+    lastHistoryCalories = 0;
+    lastHistorySpeedSum = 0;
+    lastHistorySpeedSamples = 0;
+    lastHistoryTimeSeconds = 0;
+    lastHistoryPauseCount = 0;
+    lastHistorySteps = 0;
+    liveSpeedData = [];
+    liveSpeedLabels = [];
+    liveSecondCount = 0;
+    sessionStartTime = null;
+    autoSaveCumulativeStats();
+    localStorage.removeItem("wp_session_backup");
+    updateRecoverBtn();
+    updateCumulativeStats();
+}
+
 function updateCurrentStats() {
     document.getElementById("currentSpeed").textContent =
         currentSpeed.toFixed(1);
@@ -1454,6 +1501,7 @@ function autoSaveCumulativeStats() {
     localStorage.setItem("wp_maxSpeed", maxSpeed);
     localStorage.setItem("wp_speedSum", speedSum);
     localStorage.setItem("wp_speedSamples", speedSamples);
+    localStorage.setItem("wp_deltaMaxSpeed", deltaMaxSpeed);
 }
 
 function saveSessionBackup() {
@@ -1612,6 +1660,7 @@ function mergeFromSnapshot(snapshot) {
     cumTotalPower += snapshot.cumTotalPower;
     cumEstimatedDistance += snapshot.cumEstimatedDistance;
     if (snapshot.maxSpeed > maxSpeed) maxSpeed = snapshot.maxSpeed;
+    if (snapshot.maxSpeed > deltaMaxSpeed) deltaMaxSpeed = snapshot.maxSpeed;
     speedSum += snapshot.speedSum;
     speedSamples += snapshot.speedSamples;
     autoSaveCumulativeStats();
@@ -1627,6 +1676,7 @@ function recoverFromSnapshot(snapshot) {
     cumTotalPower = snapshot.cumTotalPower;
     cumEstimatedDistance = snapshot.cumEstimatedDistance;
     maxSpeed = snapshot.maxSpeed;
+    deltaMaxSpeed = snapshot.maxSpeed;
     speedSum = snapshot.speedSum;
     speedSamples = snapshot.speedSamples;
     autoSaveCumulativeStats();
@@ -1676,6 +1726,7 @@ function loadCumulativeStats() {
     maxSpeed = parseFloat(localStorage.getItem("wp_maxSpeed")) || 0;
     speedSum = parseFloat(localStorage.getItem("wp_speedSum")) || 0;
     speedSamples = parseInt(localStorage.getItem("wp_speedSamples")) || 0;
+    deltaMaxSpeed = parseFloat(localStorage.getItem("wp_deltaMaxSpeed")) || 0;
 }
 
 const DEFAULT_SPEED_PRESETS = [3.5, 4.5, 5.5, 6.5, 7.5, 8.5];
@@ -2096,7 +2147,7 @@ function saveSessionToHistory() {
         timeSeconds: Math.max(0, deltaTimeSeconds),
         speedSum: deltaSpeedSum,
         speedSamples: deltaSpeedSamples,
-        maxSpeed: maxSpeed,
+        maxSpeed: deltaMaxSpeed || maxSpeed,
         pauses: deltaPauses,
         steps: deltaSteps,
         programId:        activeProgram?.id   ?? null,
@@ -2111,6 +2162,7 @@ function saveSessionToHistory() {
     lastHistoryTimeSeconds = cumTimeSeconds;
     lastHistoryPauseCount = pauseCount;
     lastHistorySteps = cumSteps;
+    deltaMaxSpeed = 0;
 }
 
 function getChartData() {
@@ -3454,6 +3506,7 @@ document.getElementById("continueNoBtn").addEventListener("click", () => {
     maxSpeed = 0;
     speedSum = 0;
     speedSamples = 0;
+    deltaMaxSpeed = 0;
     estimatedDistanceKm = 0;
     cumEstimatedDistance = 0;
     liveSpeedData = [];
