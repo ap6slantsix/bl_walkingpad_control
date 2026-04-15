@@ -548,6 +548,7 @@ function cancelProgram() {
     warmupPromptActive = false;
     activeProgram = null;
     clearProgramState();
+    localStorage.removeItem("wp_last_program_id");
     renderProgramSection();
     renderProgramPicker();
 }
@@ -649,6 +650,7 @@ function tickProgram() {
             programRunning = false;
             programCompletedFlag = true;
             clearProgramState();
+            localStorage.removeItem("wp_last_program_id");
             haptic([100, 50, 100, 50, 200]);
             padBeepAlert();
             showProgramCompleteToast(activeProgram?.name);
