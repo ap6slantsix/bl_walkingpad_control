@@ -1137,9 +1137,12 @@ function handleFTMSTreadmill(event) {
     cumDistance += Math.max(0, currentDistance - prevDistance);
     cumCalories += Math.max(0, currentCalories - prevCalories);
     cumTimeSeconds += Math.max(0, currentTimeSeconds - prevTimeSeconds);
-    // Dead-reckoning snap: anchor the integrated value to the pad's authoritative
-    // distance on every packet, so steps stay smooth between packets but never drift.
-    cumEstimatedDistance = cumDistance;
+    // Dead-reckoning: snap forward only. The pad has a resolution floor at low
+    // distances (reports 0.00 for the first minute or so), so a backward snap
+    // to cumDistance would zero out the local integration and freeze the step
+    // count. Advancing only when the pad is ahead of us preserves the anti-drift
+    // intent without discarding integration progress.
+    if (cumDistance > cumEstimatedDistance) cumEstimatedDistance = cumDistance;
 
     prevDistance = currentDistance;
     prevCalories = currentCalories;
@@ -1481,7 +1484,8 @@ function resetSessionStateAfterStop() {
     liveSecondCount = 0;
     sessionStartTime = null;
     autoSaveCumulativeStats();
-    localStorage.removeItem("wp_session_backup");
+    // Session backup is intentionally preserved here — if the user hit Stop by
+    // accident, the Continue modal on the next Start can restore from it.
     updateRecoverBtn();
     updateCumulativeStats();
 }
@@ -1491,7 +1495,8 @@ function updateCurrentStats() {
         currentSpeed.toFixed(1);
     document.getElementById("currentDistance").textContent =
         cumDistance.toFixed(2);
-    currentSteps = estimateSteps(cumEstimatedDistance, userHeightCm);
+    const stepEstimate = estimateSteps(cumEstimatedDistance, userHeightCm);
+    if (stepEstimate > currentSteps) currentSteps = stepEstimate;
     document.getElementById("currentCalories").textContent =
         Math.round(cumCalories);
     document.getElementById("currentTime").textContent = new Date(
@@ -1535,7 +1540,8 @@ function updateCurrentStats() {
 
 function updateCumulativeStats() {
     document.getElementById("cumDistance").textContent = cumDistance.toFixed(2);
-    cumSteps = estimateSteps(cumEstimatedDistance, userHeightCm);
+    const stepEstimate = estimateSteps(cumEstimatedDistance, userHeightCm);
+    if (stepEstimate > cumSteps) cumSteps = stepEstimate;
     document.getElementById("cumCalories").textContent =
         Math.round(cumCalories);
     document.getElementById("cumTime").textContent = new Date(
@@ -1623,6 +1629,7 @@ function autoSaveCumulativeStats() {
     localStorage.setItem("wp_speedSum", speedSum);
     localStorage.setItem("wp_speedSamples", speedSamples);
     localStorage.setItem("wp_deltaMaxSpeed", deltaMaxSpeed);
+    localStorage.setItem("wp_lastActivity", new Date().toLocaleDateString());
 }
 
 function saveSessionBackup() {
@@ -1641,6 +1648,7 @@ function saveSessionBackup() {
         savedAt: new Date().toLocaleString(),
     };
     localStorage.setItem("wp_session_backup", JSON.stringify(backup));
+    localStorage.setItem("wp_lastActivity", new Date().toLocaleDateString());
     updateRecoverBtn();
 }
 
@@ -1794,7 +1802,9 @@ function mergeFromSnapshot(snapshot) {
     pauseCount += snapshot.pauseCount;
     totalPauseTime += snapshot.totalPauseTime;
     cumTotalPower += snapshot.cumTotalPower;
-    cumEstimatedDistance += snapshot.cumEstimatedDistance;
+    // Anchor to cumDistance rather than trusting the snapshot's potentially-
+    // drifted cumEstimatedDistance.
+    cumEstimatedDistance = cumDistance;
     if (snapshot.maxSpeed > maxSpeed) maxSpeed = snapshot.maxSpeed;
     if (snapshot.maxSpeed > deltaMaxSpeed) deltaMaxSpeed = snapshot.maxSpeed;
     speedSum += snapshot.speedSum;
@@ -1811,7 +1821,9 @@ function recoverFromSnapshot(snapshot) {
     pauseCount = snapshot.pauseCount;
     totalPauseTime = snapshot.totalPauseTime;
     cumTotalPower = snapshot.cumTotalPower;
-    cumEstimatedDistance = snapshot.cumEstimatedDistance;
+    // Anchor to cumDistance rather than trusting the snapshot's potentially-
+    // drifted cumEstimatedDistance.
+    cumEstimatedDistance = cumDistance;
     maxSpeed = snapshot.maxSpeed;
     deltaMaxSpeed = snapshot.maxSpeed;
     speedSum = snapshot.speedSum;
@@ -1861,8 +1873,11 @@ function loadCumulativeStats() {
         parseFloat(localStorage.getItem("wp_lastHistoryMovingTime")) || 0;
     lastHistorySteps =
         parseInt(localStorage.getItem("wp_lastHistorySteps")) || 0;
-    cumEstimatedDistance =
-        parseFloat(localStorage.getItem("wp_cumEstimatedDistance")) || 0;
+    // cumEstimatedDistance is a smoothing aid for step counting between BLE
+    // packets — cumDistance is the pad-authoritative value. Anchor the estimate
+    // to the authoritative value on load so any previously-persisted drift
+    // (e.g. from setInterval throttling in earlier runs) doesn't carry forward.
+    cumEstimatedDistance = cumDistance;
     maxSpeed = parseFloat(localStorage.getItem("wp_maxSpeed")) || 0;
     speedSum = parseFloat(localStorage.getItem("wp_speedSum")) || 0;
     speedSamples = parseInt(localStorage.getItem("wp_speedSamples")) || 0;
@@ -3566,6 +3581,82 @@ function hideContinueModal() {
     document.getElementById("continueModal").classList.add("hidden");
 }
 
+let pendingStartAction = null;
+
+function hasRecoverableTodayBackup() {
+    const backup = JSON.parse(
+        localStorage.getItem("wp_session_backup") || "null",
+    );
+    if (!backup) return false;
+    // Short sessions stopped before the pad crossed its distance resolution
+    // floor can have cumDistance == 0 even though there was real walking —
+    // accept time or speed-sample evidence too, matching the save guard in
+    // the Stop handler.
+    const hasContent =
+        backup.cumDistance > 0 ||
+        backup.cumTimeSeconds > 0 ||
+        backup.speedSamples > 0;
+    if (!hasContent) return false;
+    const today = new Date().toLocaleDateString();
+    return backup.savedAt && backup.savedAt.startsWith(today);
+}
+
+// Run on app load before cum stats are read back in. If the last recorded
+// activity was on a previous calendar day, treat the prior session as
+// finalized and drop its residue so today starts clean — the Continue modal
+// only offers sessions from today.
+function expirePreviousDayState() {
+    const lastActivity = localStorage.getItem("wp_lastActivity");
+    if (!lastActivity) return;
+    if (lastActivity === new Date().toLocaleDateString()) return;
+    const staleKeys = [
+        "wp_cumDistance",
+        "wp_cumCalories",
+        "wp_cumTimeSeconds",
+        "wp_cumMovingTime",
+        "wp_cumPauseCount",
+        "wp_cumTotalPauseTime",
+        "wp_cumEstimatedDistance",
+        "wp_maxSpeed",
+        "wp_speedSum",
+        "wp_speedSamples",
+        "wp_deltaMaxSpeed",
+        "wp_lastHistoryDistance",
+        "wp_lastHistoryCalories",
+        "wp_lastHistorySpeedSum",
+        "wp_lastHistorySpeedSamples",
+        "wp_lastHistoryTimeSeconds",
+        "wp_lastHistoryMovingTime",
+        "wp_lastHistoryPauseCount",
+        "wp_lastHistorySteps",
+        "wp_isPaused",
+        "wp_pauseStartTimestamp",
+        "wp_session_backup",
+        // Mid-program execution state (step index, elapsed). A program
+        // interrupted yesterday shouldn't offer to resume today — matches
+        // the same-day rule for session continuity. wp_last_program_id
+        // (the picker's remembered selection) is a preference and is kept.
+        "wp_program_state",
+    ];
+    staleKeys.forEach((k) => localStorage.removeItem(k));
+    localStorage.removeItem("wp_lastActivity");
+}
+
+function promptContinueOrStart(startAction) {
+    const hasPreviousStats =
+        cumDistance > 0 ||
+        cumTimeSeconds > 0 ||
+        cumCalories > 0 ||
+        pauseCount > 0 ||
+        speedSamples > 0;
+    if (hasPreviousStats || hasRecoverableTodayBackup()) {
+        pendingStartAction = startAction;
+        showContinueModal();
+    } else {
+        startAction();
+    }
+}
+
 // ============================================================
 // 1-Second Interval: Estimated Distance, Steps, Power, Live Chart
 // ============================================================
@@ -3576,7 +3667,14 @@ let statsIntervalId = null;
 statsIntervalId = setInterval(() => {
     const speed = currentSpeed || 0;
     const now = Date.now();
-    const dt = (now - lastDistanceUpdate) / 3600000;
+    // Cap dt: browsers throttle setInterval when the tab is backgrounded (often
+    // to once per minute). On the first tick after returning to foreground, dt
+    // can span the throttled gap and a single tick would integrate a huge chunk
+    // of distance at once — jumping cumEstimatedDistance and the step count.
+    // Cap to 2s so any throttled catch-up is bounded; the pad's cumDistance will
+    // pull the estimate forward via the snap if we fall behind.
+    const rawDt = (now - lastDistanceUpdate) / 3600000;
+    const dt = Math.min(rawDt, 2 / 3600);
 
     autoBackupTick++;
     if (
@@ -3597,10 +3695,14 @@ statsIntervalId = setInterval(() => {
         lastDistanceUpdate = now;
     }
 
-    currentSteps = estimateSteps(cumEstimatedDistance, userHeightCm);
+    // Monotonic: cumEstimatedDistance snaps back to the pad's authoritative
+    // cumDistance on every BLE packet, so the raw estimate can briefly drop.
+    // Clamp to avoid step-count flicker (0↔1, 1↔2 at low distances).
+    const stepEstimate = estimateSteps(cumEstimatedDistance, userHeightCm);
+    if (stepEstimate > currentSteps) currentSteps = stepEstimate;
+    if (stepEstimate > cumSteps) cumSteps = stepEstimate;
     if (document.getElementById("currentSteps"))
         document.getElementById("currentSteps").textContent = currentSteps;
-    cumSteps = estimateSteps(cumEstimatedDistance, userHeightCm);
 
     const powerThisSecond = estimatePower(currentSpeed, userWeight);
     cumPower = powerThisSecond;
@@ -3626,19 +3728,11 @@ document.getElementById("startBtn").addEventListener("click", () => {
         showStartupIndicator(0);
         return;
     }
-    const hasPreviousStats =
-        cumDistance > 0 ||
-        cumTimeSeconds > 0 ||
-        cumCalories > 0 ||
-        pauseCount > 0 ||
-        speedSamples > 0;
-    if (hasPreviousStats) {
-        showContinueModal();
-    } else {
+    promptContinueOrStart(() => {
         setStatus("Starting…", "bg-yellow-400");
         ftmsCmd([0x07]);
         showStartupIndicator(0);
-    }
+    });
 });
 
 document
@@ -3647,25 +3741,53 @@ document
         hideContinueModal();
         if (!cFTMSControl) {
             showStartupIndicator(0);
+            pendingStartAction = null;
             return;
         }
         loadCumulativeStats();
+        const liveHasStats =
+            cumDistance > 0 ||
+            cumTimeSeconds > 0 ||
+            cumCalories > 0 ||
+            pauseCount > 0 ||
+            speedSamples > 0;
+        if (!liveHasStats && hasRecoverableTodayBackup()) {
+            // Post-Stop recovery: session was exported and live stats zeroed.
+            // Restore from the backup snapshot and pin lastHistory* watermarks
+            // to the restored cum values so the next saveSessionToHistory only
+            // writes NEW progress as a delta (no double-counting).
+            const backup = JSON.parse(
+                localStorage.getItem("wp_session_backup") || "null",
+            );
+            if (backup) {
+                recoverFromSnapshot(backup);
+                lastHistoryDistance = cumDistance;
+                lastHistoryCalories = cumCalories;
+                lastHistorySpeedSum = speedSum;
+                lastHistorySpeedSamples = speedSamples;
+                lastHistoryTimeSeconds = cumTimeSeconds;
+                lastHistoryMovingTime = cumMovingTime;
+                lastHistoryPauseCount = pauseCount;
+                lastHistorySteps = cumSteps;
+                autoSaveCumulativeStats();
+            }
+        }
         updateCumulativeStats();
         localStorage.removeItem("wp_session_backup");
         updateRecoverBtn();
-        setStatus("Starting…", "bg-yellow-400");
-        ftmsCmd([0x07]);
-        showStartupIndicator(0);
+        const action = pendingStartAction;
+        pendingStartAction = null;
+        if (action) action();
     });
 
 document.getElementById("continueNoBtn").addEventListener("click", () => {
     hideContinueModal();
     if (!cFTMSControl) {
         showStartupIndicator(0);
+        pendingStartAction = null;
         return;
     }
     if (programRunning) cancelProgram();
-    saveSessionBackup();
     cumDistance = 0;
     cumCalories = 0;
     cumTimeSeconds = 0;
@@ -3692,14 +3814,21 @@ document.getElementById("continueNoBtn").addEventListener("click", () => {
     cumSteps = 0;
     currentSteps = 0;
     autoSaveCumulativeStats();
-    setStatus("Starting…", "bg-yellow-400");
-    ftmsCmd([0x07]);
-    showStartupIndicator(0);
+    // No = discard prior session: drop any recovery snapshot so the Continue
+    // modal doesn't re-appear on the next Start.
+    localStorage.removeItem("wp_session_backup");
+    updateRecoverBtn();
+    const action = pendingStartAction;
+    pendingStartAction = null;
+    if (action) action();
 });
 
 document.getElementById("stopBtn").addEventListener("click", () => {
     haptic([50, 30, 50]);
     isPaused = false;
+    // Snapshot the live session so an accidental Stop can be recovered via the
+    // Continue modal on the next Start.
+    if (cumDistance > 0 || speedSamples > 0) saveSessionBackup();
     ftmsCmd([0x08, 0x01]);
 });
 
@@ -3759,9 +3888,12 @@ function startAndSetSpeed(targetSpeed) {
     lastSpeed = targetSpeed;
     if (programRunning) programUserOverride = true;
     if (!isRunning) {
-        pendingResumeSpeed = targetSpeed;
-        ftmsCmd([0x07]);
-        showStartupIndicator(targetSpeed);
+        promptContinueOrStart(() => {
+            pendingResumeSpeed = targetSpeed;
+            setStatus("Starting…", "bg-yellow-400");
+            ftmsCmd([0x07]);
+            showStartupIndicator(targetSpeed);
+        });
     } else {
         ftmsCmd(ftmsSpeedBytes(targetSpeed));
     }
@@ -4833,6 +4965,7 @@ document.getElementById("program-filter-pills").addEventListener("click", (e) =>
 window.addEventListener("DOMContentLoaded", () => {
     loadTheme();
     loadDefaults();
+    expirePreviousDayState();
     loadCumulativeStats();
     loadGoals();
     updateCumulativeStats();
