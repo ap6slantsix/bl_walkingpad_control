@@ -1116,7 +1116,10 @@ function handleFTMSTreadmill(event) {
             );
             dismissStartupIndicator();
             // If a program was queued for auto-start, kick it off now
-            if (chainId && activeProgram && activeProgram.id === chainId) {
+            if (activeProgram && activeProgram.id === "_warmup" && chainId) {
+                pendingProgramId = chainId;
+                startProgram();
+            } else if (chainId && activeProgram && activeProgram.id === chainId) {
                 startProgram();
             }
         }, BELT_SPEED_SET_DELAY_MS);
