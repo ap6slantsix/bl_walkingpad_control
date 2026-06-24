@@ -4,7 +4,7 @@
     <!-- head -->
     <circle cx="40" cy="17" r="7" fill="#06b6d4" stroke="none"/>
     <!-- left leg (front stride): hip → knee → foot -->
-    <polyline points="50,48 38,60 30,76" stroke-width="7" stroke="#0891b2"/>
+    <polyline points="50,48 38,59 30,74" stroke-width="7" stroke="#0891b2"/>
     <!-- right arm (back): shoulder → elbow → hand -->
     <polyline points="45,31 56,37 61,46" stroke-width="5.5" stroke="#0891b2"/>
     <!-- neck -->
@@ -14,16 +14,29 @@
     <!-- left arm (forward): shoulder → elbow → hand -->
     <polyline points="45,31 34,35 28,26" stroke-width="5.5"/>
     <!-- right leg (back stride): hip → knee → foot -->
-    <polyline points="50,48 54,64 66,76" stroke-width="7"/>
+    <polyline points="50,48 56,64 66,79" stroke-width="7"/>
   </g>
   <!-- speed lines -->
   <line x1="70" y1="22" x2="80" y2="22" stroke="#06b6d4" stroke-width="2.5" stroke-linecap="round" opacity="0.4"/>
   <line x1="72" y1="32" x2="82" y2="32" stroke="#06b6d4" stroke-width="2" stroke-linecap="round" opacity="0.3"/>
   <line x1="70" y1="42" x2="80" y2="42" stroke="#06b6d4" stroke-width="1.5" stroke-linecap="round" opacity="0.2"/>
-  <!-- treadmill belt -->
-  <rect x="14" y="80" width="72" height="6" rx="3" fill="#f59e42"/>
-  <line x1="20" y1="83" x2="28" y2="83" stroke="#0f1419" stroke-width="1.5" stroke-linecap="round" opacity="0.5"/>
-  <line x1="38" y1="83" x2="46" y2="83" stroke="#0f1419" stroke-width="1.5" stroke-linecap="round" opacity="0.5"/>
-  <line x1="56" y1="83" x2="64" y2="83" stroke="#0f1419" stroke-width="1.5" stroke-linecap="round" opacity="0.5"/>
-  <line x1="72" y1="83" x2="80" y2="83" stroke="#0f1419" stroke-width="1.5" stroke-linecap="round" opacity="0.5"/>
+  <!-- treadmill belt (slight incline, extended) -->
+  <g transform="rotate(4, 50, 85)">
+    <rect x="8" y="82" width="84" height="6" rx="3" fill="#f59e42"/>
+    <line x1="16" y1="85" x2="24" y2="85" stroke="#0f1419" stroke-width="1.5" stroke-linecap="round" opacity="0.5"/>
+    <line x1="32" y1="85" x2="40" y2="85" stroke="#0f1419" stroke-width="1.5" stroke-linecap="round" opacity="0.5"/>
+    <line x1="48" y1="85" x2="56" y2="85" stroke="#0f1419" stroke-width="1.5" stroke-linecap="round" opacity="0.5"/>
+    <line x1="64" y1="85" x2="72" y2="85" stroke="#0f1419" stroke-width="1.5" stroke-linecap="round" opacity="0.5"/>
+    <line x1="78" y1="85" x2="86" y2="85" stroke="#0f1419" stroke-width="1.5" stroke-linecap="round" opacity="0.5"/>
+    <!-- legs under treadmill (compensate for rotation so bottoms are level) -->
+    <rect x="13" y="88" width="4" height="10" rx="1" fill="#06b6d4" opacity="0.5"/>
+    <!-- control unit at front -->
+    <rect x="6" y="74" width="12" height="16" rx="2.5" fill="#0891b2"/>
+    <!-- screen on control unit -->
+    <rect x="8" y="76" width="8" height="5" rx="1" fill="#0f1419" opacity="0.6"/>
+    <!-- buttons -->
+    <circle cx="10" cy="84" r="1.2" fill="#f59e42"/>
+    <circle cx="14" cy="84" r="1.2" fill="#22d3ee"/>
+    <rect x="80" y="88" width="4" height="5" rx="1" fill="#06b6d4" opacity="0.5"/>
+  </g>
 </svg>
