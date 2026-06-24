@@ -4,137 +4,74 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="theme-color" content="#0ea5e9">
+    <meta name="theme-color" content="#0f1419">
     <link rel="manifest" href="manifest.json">
     <title>MS2H Walking Pad Control</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Exo+2:wght@700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="./output.css">
     <link rel="stylesheet" href="https://unpkg.com/@fortawesome/fontawesome-free@7.2.0/css/all.min.css"
         integrity="sha384-EXatlQyrOJgDaM9/a74ArMzy7/2bTMSrZj8ID1IPeVmc3GncfCugefCFWSLj8JL/" crossorigin="anonymous">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js"
         integrity="sha384-jb8JQMbMoBUzgWatfe6COACi2ljcDdZQ2OxczGA3bGNeWe+6DChMTBJemed7ZnvJ"
         crossorigin="anonymous"></script>
-    <style>
-        /* Consistent digit spacing in stat values */
-        .tabular-nums {
-            font-variant-numeric: tabular-nums;
-        }
-
-        /* All-time card: 2 label+value pairs per row on mobile, 3 on desktop */
-        #body-alltime {
-            grid-template-columns: auto 1fr auto 1fr;
-        }
-
-        @media (min-width: 768px) {
-            #body-alltime {
-                grid-template-columns: auto 1fr auto 1fr auto 1fr;
-            }
-        }
-
-        .hl-sporty {
-            color: #0ea5e9;
-            font-weight: 600;
-        }
-
-        /* Grid layout classes (replacing inline style attributes) */
-        .grid-2auto {
-            grid-template-columns: auto auto;
-        }
-
-        .grid-auto-3fr {
-            grid-template-columns: auto 1fr 1fr 1fr;
-        }
-
-        .grid-full-span {
-            grid-column: 1 / -1;
-        }
-
-        /* Progress bar default state — JS sets width at runtime via element.style.width */
-        .progress-bar {
-            width: 0%;
-        }
-
-        /* Suppress native <details> disclosure triangle (Safari) */
-        summary::-webkit-details-marker {
-            display: none;
-        }
-
-        summary {
-            list-style: none;
-        }
-
-        /* Styled scrollbar for program picker */
-        #program-picker-list {
-            scrollbar-width: thin;
-            scrollbar-color: rgba(107, 114, 128, 0.35) transparent;
-        }
-
-        #program-picker-list::-webkit-scrollbar {
-            width: 4px;
-        }
-
-        #program-picker-list::-webkit-scrollbar-track {
-            background: transparent;
-        }
-
-        #program-picker-list::-webkit-scrollbar-thumb {
-            background-color: rgba(107, 114, 128, 0.35);
-            border-radius: 4px;
-        }
-
-        #program-picker-list::-webkit-scrollbar-thumb:hover {
-            background-color: rgba(107, 114, 128, 0.6);
-        }
-    </style>
 </head>
 
 <body
-    class="bg-gray-100 dark:bg-tech min-h-screen text-gray-900 dark:text-white font-sans transition-colors duration-200">
+    class="bg-gray-100 dark:bg-tech bg-dot-grid min-h-screen text-gray-900 dark:text-white font-sans transition-colors duration-200 relative">
     <div class="max-w-4xl mx-auto py-8 px-4 pb-44 md:pb-8">
 
         <!-- Header -->
-        <header class="mb-6">
-            <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+        <header class="mb-8 relative z-10">
+            <div class="flex items-center justify-between mb-4">
+                <div class="flex items-center gap-3">
+                    <img src="icon.svg" alt="" class="w-8 h-8 rounded-lg shadow-glow-sm">
+                    <h1 class="font-display text-lg font-extrabold tracking-tight text-gray-900 dark:text-white">
+                        WalkingPad<span class="text-sporty">.</span>
+                    </h1>
+                </div>
                 <button id="scanBtn"
-                    class="bg-sporty hover:bg-accent text-white font-semibold py-1.5 px-3 rounded shadow flex items-center gap-2 text-sm">
+                    class="bg-gradient-cta hover:shadow-glow-md text-white font-bold py-2 px-4 rounded-xl shadow-glow-sm flex items-center gap-2 text-sm transition-all duration-200">
                     <i class="fab fa-bluetooth-b"></i> Scan &amp; Connect
                 </button>
-                <div class="flex items-center gap-2">
-                    <button id="lightDarkModeBtn"
-                        class="bg-gray-300 dark:bg-gray-700 hover:bg-sporty dark:hover:bg-sporty text-gray-900 dark:text-white font-semibold py-1.5 px-2 rounded shadow flex items-center gap-1.5 text-sm"
-                        title="Toggle Light/Dark Mode" aria-label="Toggle light/dark mode">
-                        <i class="fas fa-adjust"></i><span class="hidden sm:inline"> Mode</span>
-                    </button>
-                    <button id="settingsBtn"
-                        class="bg-gray-300 dark:bg-gray-700 hover:bg-sporty dark:hover:bg-sporty text-gray-900 dark:text-white font-semibold py-1.5 px-2 rounded shadow flex items-center gap-1.5 text-sm"
-                        aria-label="Settings">
-                        <i class="fas fa-cog"></i><span class="hidden sm:inline"> Settings</span>
-                    </button>
-                    <button id="goalsBtn"
-                        class="bg-gray-300 dark:bg-gray-700 hover:bg-sporty dark:hover:bg-sporty text-gray-900 dark:text-white font-semibold py-1.5 px-2 rounded shadow flex items-center gap-1.5 text-sm"
-                        aria-label="Goals">
-                        <i class="fas fa-bullseye"></i><span class="hidden sm:inline"> Goals</span>
-                    </button>
-                    <button id="programsBtn"
-                        class="bg-gray-300 dark:bg-gray-700 hover:bg-sporty dark:hover:bg-sporty text-gray-900 dark:text-white font-semibold py-1.5 px-2 rounded shadow flex items-center gap-1.5 text-sm"
-                        aria-label="Workout Programs">
-                        <i class="fas fa-route"></i><span class="hidden sm:inline"> Programs</span>
-                    </button>
-                    <button id="exportBtn"
-                        class="bg-accent hover:bg-sporty text-white font-semibold py-1.5 px-2 rounded shadow flex items-center gap-1.5 text-sm"
-                        aria-label="Export data">
-                        <i class="fas fa-file-export"></i><span class="hidden sm:inline"> Export</span>
-                    </button>
-                    <button id="copyForSheetsBtn"
-                        class="bg-gray-300 dark:bg-gray-700 hover:bg-sporty dark:hover:bg-sporty text-gray-900 dark:text-white font-semibold py-1.5 px-2 rounded shadow flex items-center gap-1.5 text-sm"
-                        aria-label="Copy for Sheets">
-                        <i class="fas fa-copy"></i><span class="hidden sm:inline"> Copy</span>
-                    </button>
-                </div>
             </div>
-            <div class="flex items-center gap-3">
-                <span class="flex items-center gap-1"><i class="fas fa-plug text-green-400"></i> Status:</span>
-                <span id="statusDot" class="inline-block w-2.5 h-2.5 rounded-full bg-red-500"></span>
-                <span id="status" class="font-bold">Disconnected</span>
+            <div class="flex items-center gap-1.5 flex-wrap mb-3">
+                <button id="lightDarkModeBtn"
+                    class="bg-white/10 dark:bg-white/5 hover:bg-sporty/20 dark:hover:bg-sporty/20 text-gray-600 dark:text-gray-300 hover:text-sporty font-medium py-1.5 px-2.5 rounded-lg border border-gray-200/50 dark:border-white/10 flex items-center gap-1.5 text-sm transition-all duration-150 backdrop-blur-sm"
+                    title="Toggle Light/Dark Mode" aria-label="Toggle light/dark mode">
+                    <i class="fas fa-adjust"></i><span class="hidden sm:inline"> Mode</span>
+                </button>
+                <button id="settingsBtn"
+                    class="bg-white/10 dark:bg-white/5 hover:bg-sporty/20 dark:hover:bg-sporty/20 text-gray-600 dark:text-gray-300 hover:text-sporty font-medium py-1.5 px-2.5 rounded-lg border border-gray-200/50 dark:border-white/10 flex items-center gap-1.5 text-sm transition-all duration-150 backdrop-blur-sm"
+                    aria-label="Settings">
+                    <i class="fas fa-cog"></i><span class="hidden sm:inline"> Settings</span>
+                </button>
+                <button id="goalsBtn"
+                    class="bg-white/10 dark:bg-white/5 hover:bg-sporty/20 dark:hover:bg-sporty/20 text-gray-600 dark:text-gray-300 hover:text-sporty font-medium py-1.5 px-2.5 rounded-lg border border-gray-200/50 dark:border-white/10 flex items-center gap-1.5 text-sm transition-all duration-150 backdrop-blur-sm"
+                    aria-label="Goals">
+                    <i class="fas fa-bullseye"></i><span class="hidden sm:inline"> Goals</span>
+                </button>
+                <button id="programsBtn"
+                    class="bg-white/10 dark:bg-white/5 hover:bg-sporty/20 dark:hover:bg-sporty/20 text-gray-600 dark:text-gray-300 hover:text-sporty font-medium py-1.5 px-2.5 rounded-lg border border-gray-200/50 dark:border-white/10 flex items-center gap-1.5 text-sm transition-all duration-150 backdrop-blur-sm"
+                    aria-label="Workout Programs">
+                    <i class="fas fa-route"></i><span class="hidden sm:inline"> Programs</span>
+                </button>
+                <button id="exportBtn"
+                    class="bg-accent/90 hover:bg-accent hover:shadow-glow-accent text-white font-semibold py-1.5 px-2.5 rounded-lg flex items-center gap-1.5 text-sm transition-all duration-150"
+                    aria-label="Export data">
+                    <i class="fas fa-file-export"></i><span class="hidden sm:inline"> Export</span>
+                </button>
+                <button id="copyForSheetsBtn"
+                    class="bg-white/10 dark:bg-white/5 hover:bg-sporty/20 dark:hover:bg-sporty/20 text-gray-600 dark:text-gray-300 hover:text-sporty font-medium py-1.5 px-2.5 rounded-lg border border-gray-200/50 dark:border-white/10 flex items-center gap-1.5 text-sm transition-all duration-150 backdrop-blur-sm"
+                    aria-label="Copy for Sheets">
+                    <i class="fas fa-copy"></i><span class="hidden sm:inline"> Copy</span>
+                </button>
+            </div>
+            <div class="flex items-center gap-3 px-1">
+                <span class="flex items-center gap-1.5 text-sm text-gray-500 dark:text-gray-400"><i class="fas fa-plug text-green-400 text-xs"></i> Status:</span>
+                <span id="statusDot" class="inline-block w-2.5 h-2.5 rounded-full bg-red-500 shadow-glow-sm"></span>
+                <span id="status" class="font-bold text-sm">Disconnected</span>
             </div>
         </header>
 
@@ -142,64 +79,64 @@
 
             <!-- Current Session (full width) -->
             <section id="card-session" aria-label="Current Session"
-                class="bg-gray-50 dark:bg-gray-900 rounded-xl shadow p-3 mb-4 border border-gray-200 dark:border-gray-600">
+                class="glass-card p-4 mb-5 card-animate">
                 <button class="card-collapse-btn w-full flex items-center justify-between mb-2" data-card="session">
-                    <div class="text-xs font-bold text-gray-400 uppercase tracking-widest">Current Session</div>
+                    <div class="text-xs font-bold font-display text-gray-400 dark:text-gray-500 uppercase tracking-[0.2em]">Current Session</div>
                     <i id="chevron-session"
                         class="fas fa-chevron-down text-gray-400 text-xs transition-transform duration-200"></i>
                 </button>
                 <div id="body-session">
                     <!-- Hero: Speed · Distance · Duration · Calories -->
-                    <div class="grid grid-cols-2 md:grid-cols-4 gap-2 mb-1 text-center">
-                        <div>
+                    <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-2 text-center">
+                        <div class="bg-white/50 dark:bg-white/[0.03] rounded-xl p-3 border border-gray-200/40 dark:border-white/[0.06]">
                             <div
-                                class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-0.5">
+                                class="text-[10px] font-semibold font-display text-gray-500 dark:text-gray-500 uppercase tracking-[0.15em] mb-1">
                                 Speed</div>
                             <div class="flex items-baseline justify-center gap-1">
                                 <i class="fas fa-tachometer-alt text-base opacity-0"></i>
-                                <span class="text-2xl font-bold text-sporty tabular-nums" id="currentSpeed">0.0</span>
-                                <i class="fas fa-tachometer-alt text-base text-gray-400"></i>
+                                <span class="text-3xl font-extrabold font-display text-sporty tabular-nums drop-shadow-[0_0_8px_rgba(6,182,212,0.3)]" id="currentSpeed">0.0</span>
+                                <i class="fas fa-tachometer-alt text-sm text-gray-400/60"></i>
                             </div>
                         </div>
-                        <div>
+                        <div class="bg-white/50 dark:bg-white/[0.03] rounded-xl p-3 border border-gray-200/40 dark:border-white/[0.06]">
                             <div
-                                class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-0.5">
+                                class="text-[10px] font-semibold font-display text-gray-500 dark:text-gray-500 uppercase tracking-[0.15em] mb-1">
                                 Distance</div>
                             <div class="flex items-baseline justify-center gap-1">
                                 <i class="fas fa-road text-base opacity-0"></i>
-                                <span class="text-2xl font-bold text-sporty tabular-nums"
+                                <span class="text-3xl font-extrabold font-display text-sporty tabular-nums drop-shadow-[0_0_8px_rgba(6,182,212,0.3)]"
                                     id="currentDistance">0.00</span>
-                                <i class="fas fa-road text-base text-gray-400"></i>
+                                <i class="fas fa-road text-sm text-gray-400/60"></i>
                             </div>
                         </div>
-                        <div>
+                        <div class="bg-white/50 dark:bg-white/[0.03] rounded-xl p-3 border border-gray-200/40 dark:border-white/[0.06]">
                             <div
-                                class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-0.5">
+                                class="text-[10px] font-semibold font-display text-gray-500 dark:text-gray-500 uppercase tracking-[0.15em] mb-1">
                                 Duration</div>
                             <div class="flex items-baseline justify-center gap-1">
                                 <i class="fas fa-clock text-base opacity-0"></i>
-                                <span class="text-2xl font-bold text-yellow-400 tabular-nums"
+                                <span class="text-3xl font-extrabold font-display text-yellow-400 tabular-nums drop-shadow-[0_0_8px_rgba(250,204,21,0.25)]"
                                     id="currentTime">00:00:00</span>
-                                <i class="fas fa-clock text-base text-gray-400"></i>
+                                <i class="fas fa-clock text-sm text-gray-400/60"></i>
                             </div>
                             <div class="text-[10px] text-gray-500 dark:text-gray-400 tabular-nums mt-0.5">
                                 moving <span id="currentMovingTime">00:00:00</span>
                             </div>
                         </div>
-                        <div>
+                        <div class="bg-white/50 dark:bg-white/[0.03] rounded-xl p-3 border border-gray-200/40 dark:border-white/[0.06]">
                             <div
-                                class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-0.5">
+                                class="text-[10px] font-semibold font-display text-gray-500 dark:text-gray-500 uppercase tracking-[0.15em] mb-1">
                                 Calories</div>
                             <div class="flex items-baseline justify-center gap-1">
                                 <i class="fas fa-fire text-base opacity-0"></i>
-                                <span class="text-2xl font-bold text-accent tabular-nums" id="currentCalories">0</span>
-                                <i class="fas fa-fire text-base text-gray-400"></i>
+                                <span class="text-3xl font-extrabold font-display text-accent tabular-nums drop-shadow-[0_0_8px_rgba(245,158,66,0.25)]" id="currentCalories">0</span>
+                                <i class="fas fa-fire text-sm text-gray-400/60"></i>
                             </div>
                         </div>
                     </div>
                     <!-- Secondary: Avg · Max · Pace · Avg Pace · Steps · Pauses -->
                     <div
-                        class="grid grid-cols-3 text-xs pt-2 border-t border-gray-200 dark:border-gray-700 justify-items-center">
+                        class="grid grid-cols-3 text-xs pt-2 border-t border-gray-200/50 dark:border-white/[0.06] justify-items-center">
                         <div class="grid gap-x-2 gap-y-0.5 grid-2auto">
                             <span class="flex items-center gap-0.5 text-blue-400 whitespace-nowrap"><i
                                     class="fas fa-chart-line"></i> Avg</span>
@@ -230,7 +167,7 @@
                         </div>
                     </div>
                     <!-- Program section -->
-                    <div id="program-section" class="border-t border-gray-200 dark:border-gray-700 mt-2">
+                    <div id="program-section" class="border-t border-gray-200/50 dark:border-white/[0.06] mt-2">
                         <span class="text-xs text-gray-400 uppercase tracking-wide font-semibold">Program</span>
                         <!-- State 1: no program selected -->
                         <div id="prog-state-none" class="flex items-center justify-between mt-1">
@@ -271,7 +208,7 @@
                                 belt first</p>
                             <!-- Warm-up prompt (shown when belt hasn't been active for 5+ min) -->
                             <div id="prog-warmup-prompt"
-                                class="hidden mt-2 flex items-center justify-between gap-2 border-t border-gray-200 dark:border-gray-700 pt-2">
+                                class="hidden mt-2 flex items-center justify-between gap-2 border-t border-gray-200/50 dark:border-white/[0.06] pt-2">
                                 <span class="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1">
                                     <i class="fas fa-fire text-amber-400"></i> Warm up first?
                                 </span>
@@ -348,7 +285,7 @@
 
             <!-- Program Picker Card -->
             <section id="card-programs"
-                class="hidden bg-gray-50 dark:bg-gray-900 rounded-xl shadow p-3 mb-4 border border-gray-200 dark:border-gray-600">
+                class="hidden glass-card p-4 mb-5">
                 <div class="flex items-center justify-between mb-2">
                     <div class="text-xs font-bold text-gray-400 uppercase tracking-widest flex items-center gap-1.5">
                         <i class="fas fa-route"></i> Workout Programs
@@ -366,80 +303,90 @@
             </section>
 
             <!-- Controls + Speed (desktop only) -->
-            <div class="hidden md:grid grid-cols-2 gap-3 mb-4">
+            <div class="hidden md:grid grid-cols-2 gap-3 mb-5 card-animate">
                 <div
-                    class="bg-gray-50 dark:bg-gray-900 rounded-xl shadow p-3 flex flex-col gap-2 border border-gray-200 dark:border-gray-600">
+                    class="glass-card p-4 flex flex-col gap-2">
                     <div class="flex gap-2">
                         <button id="startBtn"
-                            class="bg-green-500 hover:bg-green-600 text-white font-semibold py-1 px-3 rounded shadow flex-1 flex items-center gap-2 text-sm justify-center">
+                            class="bg-green-500 hover:bg-green-400 hover:shadow-[0_0_12px_rgba(34,197,94,0.4)] text-white font-bold py-2 px-4 rounded-xl shadow-md flex-1 flex items-center gap-2 text-sm justify-center transition-all duration-200">
                             <i class="fas fa-play"></i> Start
                         </button>
                         <button id="stopBtn"
-                            class="bg-red-600 hover:bg-red-700 text-white font-semibold py-1 px-3 rounded shadow flex-1 flex items-center gap-2 text-sm justify-center">
+                            class="bg-red-600 hover:bg-red-500 hover:shadow-[0_0_12px_rgba(239,68,68,0.4)] text-white font-bold py-2 px-4 rounded-xl shadow-md flex-1 flex items-center gap-2 text-sm justify-center transition-all duration-200">
                             <i class="fas fa-stop"></i> Stop
                         </button>
                     </div>
                     <div class="flex gap-2">
                         <button id="pauseBtn"
-                            class="bg-yellow-500 hover:bg-yellow-600 text-white font-semibold py-1 px-3 rounded shadow flex-1 flex items-center gap-2 text-sm justify-center">
+                            class="bg-yellow-500 hover:bg-yellow-400 hover:shadow-[0_0_12px_rgba(234,179,8,0.4)] text-white font-bold py-2 px-4 rounded-xl shadow-md flex-1 flex items-center gap-2 text-sm justify-center transition-all duration-200">
                             <i class="fas fa-pause"></i> Pause
                         </button>
                         <button id="resumeBtn"
-                            class="bg-blue-500 hover:bg-blue-600 text-white font-semibold py-1 px-3 rounded shadow flex-1 flex items-center gap-2 text-sm justify-center">
+                            class="bg-blue-500 hover:bg-blue-400 hover:shadow-[0_0_12px_rgba(59,130,246,0.4)] text-white font-bold py-2 px-4 rounded-xl shadow-md flex-1 flex items-center gap-2 text-sm justify-center transition-all duration-200">
                             <i class="fas fa-play"></i> Resume
                         </button>
                     </div>
                     <div id="recoveryBtnRow" class="hidden gap-2">
                         <button id="recoverExportBtn"
-                            class="hidden bg-gray-600 hover:bg-gray-500 text-white font-semibold py-1 px-3 rounded shadow flex-1 items-center gap-2 justify-center text-sm"
+                            class="hidden bg-gray-600 hover:bg-gray-500 text-white font-semibold py-2 px-3 rounded-xl shadow-md flex-1 items-center gap-2 justify-center text-sm transition-all duration-200"
                             title="">
                             <i class="fas fa-file-import"></i> From Export
                         </button>
                         <button id="recoverSessionBtn"
-                            class="hidden bg-gray-600 hover:bg-gray-500 text-white font-semibold py-1 px-3 rounded shadow flex-1 items-center gap-2 justify-center text-sm"
+                            class="hidden bg-gray-600 hover:bg-gray-500 text-white font-semibold py-2 px-3 rounded-xl shadow-md flex-1 items-center gap-2 justify-center text-sm transition-all duration-200"
                             title="">
                             <i class="fas fa-undo"></i> Recover Session
                         </button>
                     </div>
                 </div>
                 <div
-                    class="bg-gray-50 dark:bg-gray-900 rounded-xl shadow p-3 flex flex-col gap-2 border border-gray-200 dark:border-gray-600">
+                    class="glass-card p-4 flex flex-col gap-2">
                     <div class="flex gap-2 flex-1">
+                        <button id="speedDownSmallBtn"
+                            class="bg-white/5 dark:bg-white/[0.04] hover:bg-sporty/20 hover:border-sporty/60 text-gray-900 dark:text-white font-bold py-2 px-2 rounded-xl shadow-md flex items-center gap-1 border border-sporty/30 text-sm justify-center transition-all duration-200"
+                            style="flex: 0.5;">
+                            <i class="fas fa-chevron-down"></i> 0.1
+                        </button>
                         <button id="speedDownBtn"
-                            class="bg-gray-100 dark:bg-tech hover:bg-sporty text-gray-900 dark:text-white font-semibold py-1 px-3 rounded shadow flex-1 flex items-center gap-2 border border-sporty text-sm justify-center">
-                            &minus;0.5
+                            class="bg-white/5 dark:bg-white/[0.04] hover:bg-sporty/20 hover:border-sporty/60 text-gray-900 dark:text-white font-bold py-2 px-3 rounded-xl shadow-md flex-1 flex items-center gap-1 border border-sporty/30 justify-center transition-all duration-200 text-sm">
+                            <i class="fas fa-angles-down"></i> 0.5
                         </button>
                         <button id="speedUpBtn"
-                            class="bg-gray-100 dark:bg-tech hover:bg-sporty text-gray-900 dark:text-white font-semibold py-1 px-3 rounded shadow flex-1 flex items-center gap-2 border border-sporty text-sm justify-center">
-                            +0.5
+                            class="bg-white/5 dark:bg-white/[0.04] hover:bg-sporty/20 hover:border-sporty/60 text-gray-900 dark:text-white font-bold py-2 px-3 rounded-xl shadow-md flex-1 flex items-center gap-1 border border-sporty/30 justify-center transition-all duration-200 text-sm">
+                            <i class="fas fa-angles-up"></i> 0.5
+                        </button>
+                        <button id="speedUpSmallBtn"
+                            class="bg-white/5 dark:bg-white/[0.04] hover:bg-sporty/20 hover:border-sporty/60 text-gray-900 dark:text-white font-bold py-2 px-2 rounded-xl shadow-md flex items-center gap-1 border border-sporty/30 text-sm justify-center transition-all duration-200"
+                            style="flex: 0.5;">
+                            <i class="fas fa-chevron-up"></i> 0.1
                         </button>
                     </div>
                     <div class="flex gap-2">
                         <button id="presetBtn0"
-                            class="bg-sporty hover:bg-accent text-white font-semibold py-1 px-1 rounded shadow flex-1 text-sm justify-center flex items-center">
-                            3.5
+                            class="bg-sporty/80 hover:bg-sporty hover:shadow-glow-sm text-white font-bold py-2 px-1 rounded-xl shadow-md flex-1 text-sm justify-center flex items-center gap-1 transition-all duration-200">
+                            <i class="fas fa-gauge-simple-high text-xs"></i> 3.5
                         </button>
                         <button id="presetBtn1"
-                            class="bg-sporty hover:bg-accent text-white font-semibold py-1 px-1 rounded shadow flex-1 text-sm justify-center flex items-center">
-                            4.5
+                            class="bg-sporty/80 hover:bg-sporty hover:shadow-glow-sm text-white font-bold py-2 px-1 rounded-xl shadow-md flex-1 text-sm justify-center flex items-center gap-1 transition-all duration-200">
+                            <i class="fas fa-gauge-simple-high text-xs"></i> 4.5
                         </button>
                         <button id="presetBtn2"
-                            class="bg-sporty hover:bg-accent text-white font-semibold py-1 px-1 rounded shadow flex-1 text-sm justify-center flex items-center">
-                            5.5
+                            class="bg-sporty/80 hover:bg-sporty hover:shadow-glow-sm text-white font-bold py-2 px-1 rounded-xl shadow-md flex-1 text-sm justify-center flex items-center gap-1 transition-all duration-200">
+                            <i class="fas fa-gauge-simple-high text-xs"></i> 5.5
                         </button>
                     </div>
                     <div class="flex gap-2">
                         <button id="presetBtn3"
-                            class="bg-sporty hover:bg-accent text-white font-semibold py-1 px-1 rounded shadow flex-1 text-sm justify-center flex items-center">
-                            6.0
+                            class="bg-sporty/80 hover:bg-sporty hover:shadow-glow-sm text-white font-bold py-2 px-1 rounded-xl shadow-md flex-1 text-sm justify-center flex items-center gap-1 transition-all duration-200">
+                            <i class="fas fa-gauge-simple-high text-xs"></i> 6.0
                         </button>
                         <button id="presetBtn4"
-                            class="bg-sporty hover:bg-accent text-white font-semibold py-1 px-1 rounded shadow flex-1 text-sm justify-center flex items-center">
-                            7.0
+                            class="bg-sporty/80 hover:bg-sporty hover:shadow-glow-sm text-white font-bold py-2 px-1 rounded-xl shadow-md flex-1 text-sm justify-center flex items-center gap-1 transition-all duration-200">
+                            <i class="fas fa-gauge-simple-high text-xs"></i> 7.0
                         </button>
                         <button id="presetBtn5"
-                            class="bg-sporty hover:bg-accent text-white font-semibold py-1 px-1 rounded shadow flex-1 text-sm justify-center flex items-center">
-                            8.0
+                            class="bg-sporty/80 hover:bg-sporty hover:shadow-glow-sm text-white font-bold py-2 px-1 rounded-xl shadow-md flex-1 text-sm justify-center flex items-center gap-1 transition-all duration-200">
+                            <i class="fas fa-gauge-simple-high text-xs"></i> 8.0
                         </button>
                     </div>
                 </div>
@@ -447,10 +394,10 @@
 
             <!-- Period Stats: Today · 7 Days · 30 Days -->
             <section id="card-period1" aria-label="Today, 7 Days, 30 Days"
-                class="relative bg-gray-50 dark:bg-gray-900 rounded-xl shadow p-3 mb-4 border border-gray-200 dark:border-gray-600">
+                class="relative glass-card p-4 mb-5 card-animate">
                 <button id="title-period1" class="hidden card-collapse-btn w-full items-center justify-between mb-2"
                     data-card="period1">
-                    <div class="text-xs font-bold text-gray-400 uppercase tracking-widest">Today &middot; 7 Days
+                    <div class="text-xs font-bold font-display text-gray-400 dark:text-gray-500 uppercase tracking-[0.2em]">Today &middot; 7 Days
                         &middot; 30
                         Days</div>
                     <i class="fas fa-chevron-up text-gray-400 text-xs"></i>
@@ -462,12 +409,12 @@
                 </button>
                 <div id="body-period1" class="text-sm grid gap-x-3 gap-y-1 grid-auto-3fr">
                     <div></div>
-                    <div class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide pb-0.5">
+                    <div class="text-[10px] font-semibold font-display text-gray-500 dark:text-gray-500 uppercase tracking-[0.15em] pb-1.5">
                         Today
                     </div>
-                    <div class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide pb-0.5">7
+                    <div class="text-[10px] font-semibold font-display text-gray-500 dark:text-gray-500 uppercase tracking-[0.15em] pb-1.5">7
                         Days</div>
-                    <div class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide pb-0.5">
+                    <div class="text-[10px] font-semibold font-display text-gray-500 dark:text-gray-500 uppercase tracking-[0.15em] pb-1.5">
                         30
                         Days</div>
 
@@ -540,32 +487,32 @@
                     <div class="font-bold tabular-nums" id="monthActive">0/30</div>
 
                     <!-- Divider -->
-                    <div class="border-t border-gray-200 dark:border-gray-700 mt-1 mb-0.5 grid-full-span"></div>
+                    <div class="border-t border-gray-200/50 dark:border-white/[0.06] mt-2 mb-1 grid-full-span"></div>
 
                     <!-- Goal rows -->
                     <div class="text-xs text-sporty self-center">Dist</div>
                     <div>
                         <div class="text-xs text-gray-400 mb-0.5"><span id="goalDistanceProgress">0.00</span>/<span
                                 id="goalDistanceTarget">—</span> km</div>
-                        <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-1.5 overflow-hidden">
+                        <div class="w-full bg-gray-200/60 dark:bg-white/[0.06] rounded-full h-2 overflow-hidden">
                             <div id="goalDistanceBar"
-                                class="bg-sporty h-1.5 rounded-full transition-all duration-300 progress-bar"></div>
+                                class="bg-gradient-bar h-2 rounded-full transition-all duration-300 progress-bar"></div>
                         </div>
                     </div>
                     <div>
                         <div class="text-xs text-gray-400 mb-0.5"><span id="weekGoalProgress">0.00</span>/<span
                                 id="weekGoalTarget">—</span> km</div>
-                        <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-1.5 overflow-hidden">
+                        <div class="w-full bg-gray-200/60 dark:bg-white/[0.06] rounded-full h-2 overflow-hidden">
                             <div id="weekGoalBar"
-                                class="bg-sporty h-1.5 rounded-full transition-all duration-300 progress-bar"></div>
+                                class="bg-gradient-bar h-2 rounded-full transition-all duration-300 progress-bar"></div>
                         </div>
                     </div>
                     <div>
                         <div class="text-xs text-gray-400 mb-0.5"><span id="monthGoalProgress">0.00</span>/<span
                                 id="monthGoalTarget">—</span> km</div>
-                        <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-1.5 overflow-hidden">
+                        <div class="w-full bg-gray-200/60 dark:bg-white/[0.06] rounded-full h-2 overflow-hidden">
                             <div id="monthGoalBar"
-                                class="bg-sporty h-1.5 rounded-full transition-all duration-300 progress-bar"></div>
+                                class="bg-gradient-bar h-2 rounded-full transition-all duration-300 progress-bar"></div>
                         </div>
                     </div>
 
@@ -573,25 +520,25 @@
                     <div>
                         <div class="text-xs text-gray-400 mb-0.5"><span id="goalTimeProgress">00:00:00</span>/<span
                                 id="goalTimeTarget">—</span></div>
-                        <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-1.5 overflow-hidden">
+                        <div class="w-full bg-gray-200/60 dark:bg-white/[0.06] rounded-full h-2 overflow-hidden">
                             <div id="goalTimeBar"
-                                class="bg-yellow-400 h-1.5 rounded-full transition-all duration-300 progress-bar"></div>
+                                class="bg-gradient-bar-warm h-2 rounded-full transition-all duration-300 progress-bar"></div>
                         </div>
                     </div>
                     <div>
                         <div class="text-xs text-gray-400 mb-0.5"><span id="weekTimeGoalProgress">00:00:00</span>/<span
                                 id="weekTimeGoalTarget">—</span></div>
-                        <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-1.5 overflow-hidden">
+                        <div class="w-full bg-gray-200/60 dark:bg-white/[0.06] rounded-full h-2 overflow-hidden">
                             <div id="weekTimeGoalBar"
-                                class="bg-yellow-400 h-1.5 rounded-full transition-all duration-300 progress-bar"></div>
+                                class="bg-gradient-bar-warm h-2 rounded-full transition-all duration-300 progress-bar"></div>
                         </div>
                     </div>
                     <div>
                         <div class="text-xs text-gray-400 mb-0.5"><span id="monthTimeGoalProgress">00:00:00</span>/<span
                                 id="monthTimeGoalTarget">—</span></div>
-                        <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-1.5 overflow-hidden">
+                        <div class="w-full bg-gray-200/60 dark:bg-white/[0.06] rounded-full h-2 overflow-hidden">
                             <div id="monthTimeGoalBar"
-                                class="bg-yellow-400 h-1.5 rounded-full transition-all duration-300 progress-bar"></div>
+                                class="bg-gradient-bar-warm h-2 rounded-full transition-all duration-300 progress-bar"></div>
                         </div>
                     </div>
 
@@ -599,25 +546,25 @@
                     <div>
                         <div class="text-xs text-gray-400 mb-0.5"><span id="daySessionsGoalProgress">0</span>/<span
                                 id="daySessionsGoalTarget">—</span> sess</div>
-                        <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-1.5 overflow-hidden">
+                        <div class="w-full bg-gray-200/60 dark:bg-white/[0.06] rounded-full h-2 overflow-hidden">
                             <div id="daySessionsGoalBar"
-                                class="bg-purple-400 h-1.5 rounded-full transition-all duration-300 progress-bar"></div>
+                                class="bg-gradient-bar-purple h-2 rounded-full transition-all duration-300 progress-bar"></div>
                         </div>
                     </div>
                     <div>
                         <div class="text-xs text-gray-400 mb-0.5"><span id="weekSessionsGoalProgress">0</span>/<span
                                 id="weekSessionsGoalTarget">—</span> sess</div>
-                        <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-1.5 overflow-hidden">
+                        <div class="w-full bg-gray-200/60 dark:bg-white/[0.06] rounded-full h-2 overflow-hidden">
                             <div id="weekSessionsGoalBar"
-                                class="bg-purple-400 h-1.5 rounded-full transition-all duration-300 progress-bar"></div>
+                                class="bg-gradient-bar-purple h-2 rounded-full transition-all duration-300 progress-bar"></div>
                         </div>
                     </div>
                     <div>
                         <div class="text-xs text-gray-400 mb-0.5"><span id="monthSessionsGoalProgress">0</span>/<span
                                 id="monthSessionsGoalTarget">—</span> sess</div>
-                        <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-1.5 overflow-hidden">
+                        <div class="w-full bg-gray-200/60 dark:bg-white/[0.06] rounded-full h-2 overflow-hidden">
                             <div id="monthSessionsGoalBar"
-                                class="bg-purple-400 h-1.5 rounded-full transition-all duration-300 progress-bar"></div>
+                                class="bg-gradient-bar-purple h-2 rounded-full transition-all duration-300 progress-bar"></div>
                         </div>
                     </div>
                 </div>
@@ -625,10 +572,10 @@
 
             <!-- Period Stats: 3 Months · 6 Months · 12 Months -->
             <section id="card-period2" aria-label="3 Months, 6 Months, 1 Year"
-                class="relative bg-gray-50 dark:bg-gray-900 rounded-xl shadow p-3 mb-4 border border-gray-200 dark:border-gray-600">
+                class="relative glass-card p-4 mb-5 card-animate">
                 <button id="title-period2" class="hidden card-collapse-btn w-full items-center justify-between mb-2"
                     data-card="period2">
-                    <div class="text-xs font-bold text-gray-400 uppercase tracking-widest">3 Months &middot; 6 Months
+                    <div class="text-xs font-bold font-display text-gray-400 dark:text-gray-500 uppercase tracking-[0.2em]">3 Months &middot; 6 Months
                         &middot; 12 Months</div>
                     <i class="fas fa-chevron-up text-gray-400 text-xs"></i>
                 </button>
@@ -639,13 +586,13 @@
                 </button>
                 <div id="body-period2" class="text-sm grid gap-x-3 gap-y-1 grid-auto-3fr">
                     <div></div>
-                    <div class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide pb-0.5">3
+                    <div class="text-[10px] font-semibold font-display text-gray-500 dark:text-gray-500 uppercase tracking-[0.15em] pb-1.5">3
                         Mo
                     </div>
-                    <div class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide pb-0.5">6
+                    <div class="text-[10px] font-semibold font-display text-gray-500 dark:text-gray-500 uppercase tracking-[0.15em] pb-1.5">6
                         Mo
                     </div>
-                    <div class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide pb-0.5">
+                    <div class="text-[10px] font-semibold font-display text-gray-500 dark:text-gray-500 uppercase tracking-[0.15em] pb-1.5">
                         12 Mo
                     </div>
 
@@ -718,32 +665,32 @@
                     <div class="font-bold tabular-nums" id="yearActive">0/365</div>
 
                     <!-- Divider -->
-                    <div class="border-t border-gray-200 dark:border-gray-700 mt-1 mb-0.5 grid-full-span"></div>
+                    <div class="border-t border-gray-200/50 dark:border-white/[0.06] mt-2 mb-1 grid-full-span"></div>
 
                     <!-- 3 Mo / 6 Mo / 12 Mo goal rows -->
                     <div class="text-xs text-sporty self-center">Dist</div>
                     <div>
                         <div class="text-xs text-gray-400 mb-0.5"><span id="threeMonthGoalProgress">0.00</span>/<span
                                 id="threeMonthGoalTarget">—</span> km</div>
-                        <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-1.5 overflow-hidden">
+                        <div class="w-full bg-gray-200/60 dark:bg-white/[0.06] rounded-full h-2 overflow-hidden">
                             <div id="threeMonthGoalBar"
-                                class="bg-sporty h-1.5 rounded-full transition-all duration-300 progress-bar"></div>
+                                class="bg-gradient-bar h-2 rounded-full transition-all duration-300 progress-bar"></div>
                         </div>
                     </div>
                     <div>
                         <div class="text-xs text-gray-400 mb-0.5"><span id="sixMonthGoalProgress">0.00</span>/<span
                                 id="sixMonthGoalTarget">—</span> km</div>
-                        <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-1.5 overflow-hidden">
+                        <div class="w-full bg-gray-200/60 dark:bg-white/[0.06] rounded-full h-2 overflow-hidden">
                             <div id="sixMonthGoalBar"
-                                class="bg-sporty h-1.5 rounded-full transition-all duration-300 progress-bar"></div>
+                                class="bg-gradient-bar h-2 rounded-full transition-all duration-300 progress-bar"></div>
                         </div>
                     </div>
                     <div>
                         <div class="text-xs text-gray-400 mb-0.5"><span id="yearGoalProgress">0.00</span>/<span
                                 id="yearGoalTarget">—</span> km</div>
-                        <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-1.5 overflow-hidden">
+                        <div class="w-full bg-gray-200/60 dark:bg-white/[0.06] rounded-full h-2 overflow-hidden">
                             <div id="yearGoalBar"
-                                class="bg-sporty h-1.5 rounded-full transition-all duration-300 progress-bar"></div>
+                                class="bg-gradient-bar h-2 rounded-full transition-all duration-300 progress-bar"></div>
                         </div>
                     </div>
 
@@ -753,26 +700,26 @@
                                 id="threeMonthTimeGoalProgress">00:00:00</span>/<span
                                 id="threeMonthTimeGoalTarget">—</span>
                         </div>
-                        <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-1.5 overflow-hidden">
+                        <div class="w-full bg-gray-200/60 dark:bg-white/[0.06] rounded-full h-2 overflow-hidden">
                             <div id="threeMonthTimeGoalBar"
-                                class="bg-yellow-400 h-1.5 rounded-full transition-all duration-300 progress-bar"></div>
+                                class="bg-gradient-bar-warm h-2 rounded-full transition-all duration-300 progress-bar"></div>
                         </div>
                     </div>
                     <div>
                         <div class="text-xs text-gray-400 mb-0.5"><span
                                 id="sixMonthTimeGoalProgress">00:00:00</span>/<span id="sixMonthTimeGoalTarget">—</span>
                         </div>
-                        <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-1.5 overflow-hidden">
+                        <div class="w-full bg-gray-200/60 dark:bg-white/[0.06] rounded-full h-2 overflow-hidden">
                             <div id="sixMonthTimeGoalBar"
-                                class="bg-yellow-400 h-1.5 rounded-full transition-all duration-300 progress-bar"></div>
+                                class="bg-gradient-bar-warm h-2 rounded-full transition-all duration-300 progress-bar"></div>
                         </div>
                     </div>
                     <div>
                         <div class="text-xs text-gray-400 mb-0.5"><span id="yearTimeGoalProgress">00:00:00</span>/<span
                                 id="yearTimeGoalTarget">—</span></div>
-                        <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-1.5 overflow-hidden">
+                        <div class="w-full bg-gray-200/60 dark:bg-white/[0.06] rounded-full h-2 overflow-hidden">
                             <div id="yearTimeGoalBar"
-                                class="bg-yellow-400 h-1.5 rounded-full transition-all duration-300 progress-bar"></div>
+                                class="bg-gradient-bar-warm h-2 rounded-full transition-all duration-300 progress-bar"></div>
                         </div>
                     </div>
                 </div>
@@ -780,9 +727,9 @@
 
             <!-- All Time -->
             <section id="card-alltime" aria-label="All Time"
-                class="bg-gray-50 dark:bg-gray-900 rounded-xl shadow p-3 mb-4 border border-gray-200 dark:border-gray-600">
+                class="glass-card p-4 mb-5 card-animate">
                 <button class="card-collapse-btn w-full flex items-center justify-between mb-2" data-card="alltime">
-                    <div class="text-xs font-bold text-gray-400 uppercase tracking-widest">All Time</div>
+                    <div class="text-xs font-bold font-display text-gray-400 dark:text-gray-500 uppercase tracking-[0.2em]">All Time</div>
                     <i id="chevron-alltime"
                         class="fas fa-chevron-down text-gray-400 text-xs transition-transform duration-200"></i>
                 </button>
@@ -837,10 +784,10 @@
 
             <!-- Live Speed Chart -->
             <section id="card-livespeed" aria-label="Live Speed"
-                class="bg-gray-50 dark:bg-gray-900 rounded-xl shadow p-3 mb-4 border border-gray-200 dark:border-gray-600">
+                class="glass-card p-4 mb-5 card-animate">
                 <button onclick="toggleSection('liveSpeedContent', 'liveSpeedChevron')"
                     class="w-full flex items-center justify-between mb-2">
-                    <div class="text-xs font-bold text-gray-400 uppercase tracking-widest">Live Speed</div>
+                    <div class="text-xs font-bold font-display text-gray-400 dark:text-gray-500 uppercase tracking-[0.2em]">Live Speed</div>
                     <i id="liveSpeedChevron"
                         class="fas fa-chevron-down text-gray-400 text-xs transition-transform duration-200"></i>
                 </button>
@@ -848,29 +795,29 @@
                     <div class="flex flex-wrap items-center gap-1 mb-2">
                         <span class="text-xs text-gray-400">Win:</span>
                         <button data-window="30"
-                            class="live-window-btn px-2 py-0.5 rounded text-xs font-semibold bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-sporty hover:text-white">30s</button>
+                            class="live-window-btn px-2 py-0.5 rounded-lg text-xs font-semibold transition-all duration-150 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-sporty hover:text-white">30s</button>
                         <button data-window="60"
-                            class="live-window-btn px-2 py-0.5 rounded text-xs font-semibold bg-sporty text-white">1m</button>
+                            class="live-window-btn px-2 py-0.5 rounded-lg text-xs font-semibold transition-all duration-150 bg-sporty text-white">1m</button>
                         <button data-window="120"
-                            class="live-window-btn px-2 py-0.5 rounded text-xs font-semibold bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-sporty hover:text-white">2m</button>
+                            class="live-window-btn px-2 py-0.5 rounded-lg text-xs font-semibold transition-all duration-150 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-sporty hover:text-white">2m</button>
                         <button data-window="300"
-                            class="live-window-btn px-2 py-0.5 rounded text-xs font-semibold bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-sporty hover:text-white">5m</button>
+                            class="live-window-btn px-2 py-0.5 rounded-lg text-xs font-semibold transition-all duration-150 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-sporty hover:text-white">5m</button>
                         <button data-window="600"
-                            class="live-window-btn px-2 py-0.5 rounded text-xs font-semibold bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-sporty hover:text-white">10m</button>
+                            class="live-window-btn px-2 py-0.5 rounded-lg text-xs font-semibold transition-all duration-150 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-sporty hover:text-white">10m</button>
                         <button data-window="1800"
-                            class="live-window-btn px-2 py-0.5 rounded text-xs font-semibold bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-sporty hover:text-white">30m</button>
+                            class="live-window-btn px-2 py-0.5 rounded-lg text-xs font-semibold transition-all duration-150 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-sporty hover:text-white">30m</button>
                         <button data-window="3600"
-                            class="live-window-btn px-2 py-0.5 rounded text-xs font-semibold bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-sporty hover:text-white">1h</button>
+                            class="live-window-btn px-2 py-0.5 rounded-lg text-xs font-semibold transition-all duration-150 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-sporty hover:text-white">1h</button>
                         <span class="text-gray-300 dark:text-gray-600 mx-0.5">|</span>
                         <span class="text-xs text-gray-400">Y:</span>
                         <button data-ymax="0"
-                            class="live-ymax-btn px-2 py-0.5 rounded text-xs font-semibold bg-sporty text-white">Auto</button>
+                            class="live-ymax-btn px-2 py-0.5 rounded-lg text-xs font-semibold transition-all duration-150 bg-sporty text-white">Auto</button>
                         <button data-ymax="6"
-                            class="live-ymax-btn px-2 py-0.5 rounded text-xs font-semibold bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-sporty hover:text-white">6</button>
+                            class="live-ymax-btn px-2 py-0.5 rounded-lg text-xs font-semibold transition-all duration-150 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-sporty hover:text-white">6</button>
                         <button data-ymax="8"
-                            class="live-ymax-btn px-2 py-0.5 rounded text-xs font-semibold bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-sporty hover:text-white">8</button>
+                            class="live-ymax-btn px-2 py-0.5 rounded-lg text-xs font-semibold transition-all duration-150 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-sporty hover:text-white">8</button>
                         <button data-ymax="12"
-                            class="live-ymax-btn px-2 py-0.5 rounded text-xs font-semibold bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-sporty hover:text-white">12</button>
+                            class="live-ymax-btn px-2 py-0.5 rounded-lg text-xs font-semibold transition-all duration-150 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-sporty hover:text-white">12</button>
                     </div>
                     <canvas id="liveSpeedChart" height="80"></canvas>
                 </div>
@@ -878,39 +825,39 @@
 
             <!-- Daily Trends -->
             <section id="card-trends" aria-label="Trends"
-                class="bg-gray-50 dark:bg-gray-900 rounded-xl shadow p-3 mb-4 border border-gray-200 dark:border-gray-600">
+                class="glass-card p-4 mb-5 card-animate">
                 <button onclick="toggleSection('historyChartsContent', 'historyChartsChevron')"
                     class="w-full flex items-center justify-between mb-2">
-                    <div class="text-xs font-bold text-gray-400 uppercase tracking-widest">Daily Trends</div>
+                    <div class="text-xs font-bold font-display text-gray-400 dark:text-gray-500 uppercase tracking-[0.2em]">Daily Trends</div>
                     <i id="historyChartsChevron"
                         class="fas fa-chevron-down text-gray-400 text-xs transition-transform duration-200"></i>
                 </button>
                 <div id="historyChartsContent" class="pb-1">
                     <!-- Mobile-only tab selector -->
                     <div class="flex gap-1 mb-3 md:hidden">
-                        <button class="trend-tab-btn py-1 px-3 rounded text-xs font-semibold bg-sporty text-white"
+                        <button class="trend-tab-btn py-1 px-3 rounded-lg text-xs font-semibold transition-all duration-150 bg-sporty text-white"
                             data-chart="distance">Distance</button>
                         <button
-                            class="trend-tab-btn py-1 px-3 rounded text-xs font-semibold bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300"
+                            class="trend-tab-btn py-1 px-3 rounded-lg text-xs font-semibold transition-all duration-150 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300"
                             data-chart="calories">Calories</button>
                         <button
-                            class="trend-tab-btn py-1 px-3 rounded text-xs font-semibold bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300"
+                            class="trend-tab-btn py-1 px-3 rounded-lg text-xs font-semibold transition-all duration-150 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300"
                             data-chart="speed">Avg Speed</button>
                     </div>
                     <!-- Desktop: 3-col grid. Mobile: single chart shown via tabs -->
                     <div class="md:grid md:grid-cols-3 gap-4">
                         <div id="trendChartWrap-distance">
-                            <h3 class="hidden md:block text-sm font-semibold text-sporty mb-2 uppercase text-center">
+                            <h3 class="hidden md:block text-xs font-semibold font-display text-sporty mb-2 uppercase tracking-[0.15em] text-center">
                                 Distance (km)</h3>
                             <canvas id="distanceChart"></canvas>
                         </div>
                         <div id="trendChartWrap-calories" class="hidden md:block">
-                            <h3 class="text-sm font-semibold text-accent mb-2 uppercase text-center">Calories (kcal)
+                            <h3 class="text-xs font-semibold font-display text-accent mb-2 uppercase tracking-[0.15em] text-center">Calories (kcal)
                             </h3>
                             <canvas id="caloriesChart"></canvas>
                         </div>
                         <div id="trendChartWrap-speed" class="hidden md:block">
-                            <h3 class="text-sm font-semibold text-blue-400 mb-2 uppercase text-center">Avg Speed (km/h)
+                            <h3 class="text-xs font-semibold font-display text-blue-400 mb-2 uppercase tracking-[0.15em] text-center">Avg Speed (km/h)
                             </h3>
                             <canvas id="speedChart"></canvas>
                         </div>
@@ -920,10 +867,10 @@
 
             <!-- Session History Table -->
             <section id="card-history" aria-label="Session History"
-                class="bg-gray-50 dark:bg-gray-900 rounded-xl shadow p-3 mb-4 border border-gray-200 dark:border-gray-600">
+                class="glass-card p-4 mb-5 card-animate">
                 <button onclick="toggleSection('sessionHistoryContent', 'sessionHistoryChevron')"
                     class="w-full flex items-center justify-between mb-2">
-                    <div class="text-xs font-bold text-gray-400 uppercase tracking-widest">Session History</div>
+                    <div class="text-xs font-bold font-display text-gray-400 dark:text-gray-500 uppercase tracking-[0.2em]">Session History</div>
                     <i id="sessionHistoryChevron"
                         class="fas fa-chevron-down text-gray-400 text-xs transition-transform duration-200"></i>
                 </button>
@@ -931,20 +878,20 @@
                     <div class="flex items-center justify-between mb-2">
                         <div class="flex gap-1">
                             <button id="historyViewDayBtn"
-                                class="text-xs py-1 px-2 rounded font-semibold bg-sporty text-white">By Day</button>
+                                class="text-xs py-1 px-2 rounded-lg font-semibold bg-sporty text-white transition-all duration-150">By Day</button>
                             <button id="historyViewSessionBtn"
-                                class="text-xs py-1 px-2 rounded font-semibold bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-sporty hover:text-white">By
+                                class="text-xs py-1 px-2 rounded-lg font-semibold bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-sporty hover:text-white transition-all duration-150">By
                                 Session</button>
                         </div>
                         <button id="clearHistoryBtn"
-                            class="bg-red-600 hover:bg-red-700 text-white font-semibold py-1 px-2 rounded text-xs flex items-center gap-1">
+                            class="bg-red-600/80 hover:bg-red-600 hover:shadow-[0_0_10px_rgba(239,68,68,0.3)] text-white font-semibold py-1 px-2.5 rounded-lg text-xs flex items-center gap-1 transition-all duration-150">
                             <i class="fas fa-trash"></i> Clear History
                         </button>
                     </div>
                     <div class="overflow-x-auto">
                         <table class="w-full text-sm">
                             <thead id="historyTableHead">
-                                <tr class="text-left border-b border-gray-200 dark:border-gray-700">
+                                <tr class="text-left border-b border-gray-200/50 dark:border-white/[0.06]">
                                     <th class="pb-2 text-gray-500 dark:text-gray-400 font-semibold">Date</th>
                                     <th class="pb-2 text-sporty font-semibold">km</th>
                                     <th class="pb-2 text-accent font-semibold">kcal</th>
@@ -970,9 +917,9 @@
 
     <!-- Clear History Confirmation Modal -->
     <div id="clearConfirmModal"
-        class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
-        <div class="bg-gray-50 dark:bg-gray-900 rounded-lg p-5 shadow-lg max-w-sm w-full mx-4">
-            <h3 class="text-base font-bold mb-2 text-red-500 flex items-center gap-2">
+        class="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 hidden">
+        <div class="bg-white/95 dark:bg-surface/90 backdrop-blur-xl rounded-2xl p-6 shadow-2xl shadow-black/20 max-w-sm w-full mx-4 border border-gray-200/30 dark:border-white/[0.08] ring-1 ring-white/5">
+            <h3 class="text-base font-bold font-display mb-2 text-red-500 flex items-center gap-2">
                 <i class="fas fa-trash"></i> Clear Session History
             </h3>
             <p class="text-sm text-gray-500 dark:text-gray-400 mb-4">All session history will be permanently deleted,
@@ -993,66 +940,76 @@
 
     <!-- Mobile Bottom Control Bar -->
     <div
-        class="fixed bottom-0 left-0 right-0 md:hidden bg-gray-50 dark:bg-gray-900 border-t border-gray-200 dark:border-gray-600 shadow-2xl z-40">
-        <div class="flex gap-1.5 p-2 pb-1">
+        class="fixed bottom-0 left-0 right-0 md:hidden bg-white/90 dark:bg-[#0d1117]/95 backdrop-blur-xl border-t border-gray-200/30 dark:border-white/[0.08] shadow-[0_-4px_30px_rgba(0,0,0,0.3)] z-40">
+        <div class="flex gap-2 p-2.5 pb-1.5">
             <button id="startBtnM"
-                class="bg-green-500 active:bg-green-600 text-white font-semibold rounded flex-1 h-12 flex flex-col items-center justify-center gap-0.5">
+                class="bg-green-500 active:bg-green-400 active:shadow-[0_0_16px_rgba(34,197,94,0.5)] text-white font-bold rounded-xl flex-1 h-12 flex flex-col items-center justify-center gap-0.5 transition-all duration-150">
                 <i class="fas fa-play text-sm"></i><span class="text-xs">Start</span>
             </button>
             <button id="stopBtnM"
-                class="bg-red-600 active:bg-red-700 text-white font-semibold rounded flex-1 h-12 flex flex-col items-center justify-center gap-0.5">
+                class="bg-red-600 active:bg-red-500 active:shadow-[0_0_16px_rgba(239,68,68,0.5)] text-white font-bold rounded-xl flex-1 h-12 flex flex-col items-center justify-center gap-0.5 transition-all duration-150">
                 <i class="fas fa-stop text-sm"></i><span class="text-xs">Stop</span>
             </button>
             <button id="pauseBtnM"
-                class="bg-yellow-500 active:bg-yellow-600 text-white font-semibold rounded flex-1 h-12 flex flex-col items-center justify-center gap-0.5">
+                class="bg-yellow-500 active:bg-yellow-400 active:shadow-[0_0_16px_rgba(234,179,8,0.5)] text-white font-bold rounded-xl flex-1 h-12 flex flex-col items-center justify-center gap-0.5 transition-all duration-150">
                 <i class="fas fa-pause text-sm"></i><span class="text-xs">Pause</span>
             </button>
             <button id="resumeBtnM"
-                class="bg-blue-500 active:bg-blue-600 text-white font-semibold rounded flex-1 h-12 flex flex-col items-center justify-center gap-0.5">
+                class="bg-blue-500 active:bg-blue-400 active:shadow-[0_0_16px_rgba(59,130,246,0.5)] text-white font-bold rounded-xl flex-1 h-12 flex flex-col items-center justify-center gap-0.5 transition-all duration-150">
                 <i class="fas fa-play text-sm"></i><span class="text-xs">Resume</span>
             </button>
         </div>
-        <div class="flex items-center justify-center gap-1.5 py-0.5 border-t border-gray-100 dark:border-gray-700">
-            <span id="mobileCurrentSpeed" class="text-sporty font-bold text-xl">0.0</span>
+        <div class="flex items-center justify-center gap-2 py-1 border-t border-gray-200/30 dark:border-white/[0.06]">
+            <span id="mobileCurrentSpeed" class="text-sporty font-extrabold font-display text-2xl tabular-nums drop-shadow-[0_0_8px_rgba(6,182,212,0.3)]">0.0</span>
             <span class="text-gray-400 text-xs">km/h</span>
         </div>
         <div class="grid gap-1.5 px-2 py-1.5 pb-2"
-            style="grid-template-columns: 1fr 1fr 1fr 1fr 1fr; grid-template-rows: auto auto;">
-            <button id="speedDownBtnM"
-                class="bg-gray-100 dark:bg-gray-700 active:bg-sporty text-gray-900 dark:text-white font-bold rounded flex items-center justify-center border border-sporty text-sm"
+            style="grid-template-columns: 0.7fr 1fr 1fr 1fr 1fr 1fr 0.7fr; grid-template-rows: auto auto;">
+            <button id="speedDownSmallBtnM"
+                class="bg-white/5 dark:bg-white/[0.04] active:bg-sporty/30 text-gray-900 dark:text-white font-bold rounded-xl flex items-center justify-center gap-1 border border-sporty/30 text-sm transition-all duration-150"
                 style="grid-column: 1; grid-row: 1 / span 2;">
-                &minus;0.5
+                <i class="fas fa-chevron-down"></i> 0.1
+            </button>
+            <button id="speedDownBtnM"
+                class="bg-white/5 dark:bg-white/[0.04] active:bg-sporty/30 text-gray-900 dark:text-white font-bold rounded-xl flex items-center justify-center gap-1 border border-sporty/30 text-sm transition-all duration-150"
+                style="grid-column: 2; grid-row: 1 / span 2;">
+                <i class="fas fa-angles-down"></i> 0.5
             </button>
             <button id="presetBtn0M"
-                class="bg-sporty active:bg-accent text-white font-bold rounded h-9 flex items-center justify-center text-sm"
-                style="grid-column: 2; grid-row: 1;">3.5</button>
+                class="bg-sporty/80 active:bg-sporty active:shadow-glow-sm text-white font-bold rounded-xl h-10 flex items-center justify-center gap-1 text-sm transition-all duration-150"
+                style="grid-column: 3; grid-row: 1;"><i class="fas fa-gauge-simple-high text-xs"></i> 3.5</button>
             <button id="presetBtn1M"
-                class="bg-sporty active:bg-accent text-white font-bold rounded h-9 flex items-center justify-center text-sm"
-                style="grid-column: 3; grid-row: 1;">4.5</button>
+                class="bg-sporty/80 active:bg-sporty active:shadow-glow-sm text-white font-bold rounded-xl h-10 flex items-center justify-center gap-1 text-sm transition-all duration-150"
+                style="grid-column: 4; grid-row: 1;"><i class="fas fa-gauge-simple-high text-xs"></i> 4.5</button>
             <button id="presetBtn2M"
-                class="bg-sporty active:bg-accent text-white font-bold rounded h-9 flex items-center justify-center text-sm"
-                style="grid-column: 4; grid-row: 1;">5.5</button>
+                class="bg-sporty/80 active:bg-sporty active:shadow-glow-sm text-white font-bold rounded-xl h-10 flex items-center justify-center gap-1 text-sm transition-all duration-150"
+                style="grid-column: 5; grid-row: 1;"><i class="fas fa-gauge-simple-high text-xs"></i> 5.5</button>
             <button id="speedUpBtnM"
-                class="bg-gray-100 dark:bg-gray-700 active:bg-sporty text-gray-900 dark:text-white font-bold rounded flex items-center justify-center border border-sporty text-sm"
-                style="grid-column: 5; grid-row: 1 / span 2;">
-                +0.5
+                class="bg-white/5 dark:bg-white/[0.04] active:bg-sporty/30 text-gray-900 dark:text-white font-bold rounded-xl flex items-center justify-center gap-1 border border-sporty/30 text-sm transition-all duration-150"
+                style="grid-column: 6; grid-row: 1 / span 2;">
+                <i class="fas fa-angles-up"></i> 0.5
+            </button>
+            <button id="speedUpSmallBtnM"
+                class="bg-white/5 dark:bg-white/[0.04] active:bg-sporty/30 text-gray-900 dark:text-white font-bold rounded-xl flex items-center justify-center gap-1 border border-sporty/30 text-sm transition-all duration-150"
+                style="grid-column: 7; grid-row: 1 / span 2;">
+                <i class="fas fa-chevron-up"></i> 0.1
             </button>
             <button id="presetBtn3M"
-                class="bg-sporty active:bg-accent text-white font-bold rounded h-9 flex items-center justify-center text-sm"
-                style="grid-column: 2; grid-row: 2;">6.0</button>
+                class="bg-sporty/80 active:bg-sporty active:shadow-glow-sm text-white font-bold rounded-xl h-10 flex items-center justify-center gap-1 text-sm transition-all duration-150"
+                style="grid-column: 3; grid-row: 2;"><i class="fas fa-gauge-simple-high text-xs"></i> 6.0</button>
             <button id="presetBtn4M"
-                class="bg-sporty active:bg-accent text-white font-bold rounded h-9 flex items-center justify-center text-sm"
-                style="grid-column: 3; grid-row: 2;">7.0</button>
+                class="bg-sporty/80 active:bg-sporty active:shadow-glow-sm text-white font-bold rounded-xl h-10 flex items-center justify-center gap-1 text-sm transition-all duration-150"
+                style="grid-column: 4; grid-row: 2;"><i class="fas fa-gauge-simple-high text-xs"></i> 7.0</button>
             <button id="presetBtn5M"
-                class="bg-sporty active:bg-accent text-white font-bold rounded h-9 flex items-center justify-center text-sm"
-                style="grid-column: 4; grid-row: 2;">8.0</button>
+                class="bg-sporty/80 active:bg-sporty active:shadow-glow-sm text-white font-bold rounded-xl h-10 flex items-center justify-center gap-1 text-sm transition-all duration-150"
+                style="grid-column: 5; grid-row: 2;"><i class="fas fa-gauge-simple-high text-xs"></i> 8.0</button>
         </div>
     </div>
 
     <!-- Onboarding Modal -->
-    <div id="onboardingModal" class="fixed inset-0 bg-black bg-opacity-80 items-center justify-center z-50 hidden">
-        <div class="bg-gray-50 dark:bg-gray-900 rounded-xl p-6 shadow-2xl max-w-sm w-full mx-4">
-            <h3 class="text-xl font-bold mb-2 text-accent flex items-center gap-2">
+    <div id="onboardingModal" class="fixed inset-0 bg-black/70 backdrop-blur-md items-center justify-center z-50 hidden">
+        <div class="bg-white/95 dark:bg-surface/90 backdrop-blur-xl rounded-2xl p-6 shadow-2xl shadow-black/20 max-w-sm w-full mx-4 border border-gray-200/30 dark:border-white/[0.08] ring-1 ring-white/5">
+            <h3 class="text-xl font-bold font-display mb-2 text-accent flex items-center gap-2">
                 <i class="fas fa-user-circle"></i> Welcome!
             </h3>
             <p class="text-sm text-gray-500 dark:text-gray-300 mb-6">Enter your details to get accurate calorie, power,
@@ -1062,7 +1019,7 @@
                     <label class="text-sporty font-semibold w-28 text-right text-sm">Weight (kg)</label>
                     <input id="onboardingWeight" type="number" min="30" max="200" step="0.1" placeholder="e.g. 75"
                         autocomplete="off"
-                        class="bg-gray-100 dark:bg-gray-900 text-gray-900 dark:text-white rounded px-3 py-2 flex-1 border border-sporty text-lg" />
+                        class="bg-gray-100/80 dark:bg-white/[0.04] text-gray-900 dark:text-white rounded-lg px-3 py-2 flex-1 border border-sporty/40 focus:border-sporty focus:ring-1 focus:ring-sporty/30 text-lg transition-all duration-150 outline-none" />
                 </div>
                 <div class="flex items-center gap-3">
                     <label class="text-sporty font-semibold w-28 text-right text-sm shrink-0">Height</label>
@@ -1070,17 +1027,17 @@
                         <div id="onboardingHeightFtInInputs" class="flex items-center gap-1 flex-1 min-w-0">
                             <input id="onboardingHeightFt" type="number" min="3" max="8" placeholder="5"
                                 autocomplete="off"
-                                class="bg-gray-100 dark:bg-gray-900 text-gray-900 dark:text-white rounded px-1 py-2 w-12 border border-sporty text-lg text-center" />
+                                class="bg-gray-100/80 dark:bg-white/[0.04] text-gray-900 dark:text-white rounded-lg px-1 py-2 w-12 border border-sporty/40 focus:border-sporty focus:ring-1 focus:ring-sporty/30 text-lg text-center transition-all duration-150 outline-none" />
                             <span class="text-sm text-gray-500 dark:text-gray-400">ft</span>
                             <input id="onboardingHeightIn" type="number" min="0" max="11" placeholder="11"
                                 autocomplete="off"
-                                class="bg-gray-100 dark:bg-gray-900 text-gray-900 dark:text-white rounded px-1 py-2 w-12 border border-sporty text-lg text-center" />
+                                class="bg-gray-100/80 dark:bg-white/[0.04] text-gray-900 dark:text-white rounded-lg px-1 py-2 w-12 border border-sporty/40 focus:border-sporty focus:ring-1 focus:ring-sporty/30 text-lg text-center transition-all duration-150 outline-none" />
                             <span class="text-sm text-gray-500 dark:text-gray-400">in</span>
                         </div>
                         <div id="onboardingHeightCmInputs" class="items-center gap-1 flex-1 hidden">
                             <input id="onboardingHeightCm" type="number" min="90" max="250" placeholder="180"
                                 autocomplete="off"
-                                class="bg-gray-100 dark:bg-gray-900 text-gray-900 dark:text-white rounded px-3 py-2 w-full border border-sporty text-lg text-center" />
+                                class="bg-gray-100/80 dark:bg-white/[0.04] text-gray-900 dark:text-white rounded-lg px-3 py-2 w-full border border-sporty/40 focus:border-sporty focus:ring-1 focus:ring-sporty/30 text-lg text-center transition-all duration-150 outline-none" />
                             <span class="text-sm text-gray-500 dark:text-gray-400">cm</span>
                         </div>
                         <div
@@ -1095,38 +1052,38 @@
                 <div class="flex items-center gap-3">
                     <label class="text-sporty font-semibold w-28 text-right text-sm">Age</label>
                     <input id="onboardingAge" type="number" min="10" max="120" placeholder="e.g. 30" autocomplete="off"
-                        class="bg-gray-100 dark:bg-gray-900 text-gray-900 dark:text-white rounded px-3 py-2 flex-1 border border-sporty text-lg" />
+                        class="bg-gray-100/80 dark:bg-white/[0.04] text-gray-900 dark:text-white rounded-lg px-3 py-2 flex-1 border border-sporty/40 focus:border-sporty focus:ring-1 focus:ring-sporty/30 text-lg transition-all duration-150 outline-none" />
                 </div>
             </div>
             <p id="onboardingError" class="text-red-500 text-sm mb-3 hidden">Please fill in all fields.</p>
             <button id="saveOnboardingBtn"
-                class="w-full bg-sporty hover:bg-accent text-white font-bold py-3 rounded-lg text-lg">
+                class="w-full bg-gradient-cta hover:shadow-glow-md text-white font-bold py-3 rounded-xl text-lg transition-all duration-200">
                 Get Started
             </button>
         </div>
     </div>
 
     <!-- Recovery Confirm Modal -->
-    <div id="recoverModal" class="fixed inset-0 bg-black bg-opacity-50 items-center justify-center z-50 hidden">
-        <div class="bg-gray-50 dark:bg-gray-900 rounded-lg p-6 shadow-lg max-w-sm w-full mx-4">
-            <h3 class="text-xl font-bold mb-1 text-accent flex items-center gap-2">
+    <div id="recoverModal" class="fixed inset-0 bg-black/60 backdrop-blur-sm items-center justify-center z-50 hidden">
+        <div class="bg-white/95 dark:bg-surface/90 backdrop-blur-xl rounded-2xl p-6 shadow-2xl shadow-black/20 max-w-sm w-full mx-4 border border-gray-200/30 dark:border-white/[0.08] ring-1 ring-white/5">
+            <h3 class="text-xl font-bold font-display mb-1 text-accent flex items-center gap-2">
                 <i class="fas fa-undo"></i> <span id="recoverModalTitle">Recover Session</span>
             </h3>
             <p class="text-xs text-gray-400 mb-4" id="recoverModalSavedAt"></p>
             <div class="space-y-2 mb-6 text-sm">
-                <div class="flex justify-between border-b border-gray-200 dark:border-gray-700 pb-1">
+                <div class="flex justify-between border-b border-gray-200/50 dark:border-white/[0.06] pb-1">
                     <span class="text-gray-500 dark:text-gray-400">Distance</span>
                     <span class="font-bold text-sporty" id="recoverModalDistance">—</span>
                 </div>
-                <div class="flex justify-between border-b border-gray-200 dark:border-gray-700 pb-1">
+                <div class="flex justify-between border-b border-gray-200/50 dark:border-white/[0.06] pb-1">
                     <span class="text-gray-500 dark:text-gray-400">Calories</span>
                     <span class="font-bold text-accent" id="recoverModalCalories">—</span>
                 </div>
-                <div class="flex justify-between border-b border-gray-200 dark:border-gray-700 pb-1">
+                <div class="flex justify-between border-b border-gray-200/50 dark:border-white/[0.06] pb-1">
                     <span class="text-gray-500 dark:text-gray-400">Time</span>
                     <span class="font-bold text-yellow-400" id="recoverModalTime">—</span>
                 </div>
-                <div class="flex justify-between border-b border-gray-200 dark:border-gray-700 pb-1">
+                <div class="flex justify-between border-b border-gray-200/50 dark:border-white/[0.06] pb-1">
                     <span class="text-gray-500 dark:text-gray-400">Max Speed</span>
                     <span class="font-bold text-green-400" id="recoverModalMaxSpeed">—</span>
                 </div>
@@ -1159,9 +1116,9 @@
     </div>
 
     <!-- Continue Session Modal -->
-    <div id="continueModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
-        <div class="bg-gray-50 dark:bg-gray-900 rounded-lg p-6 shadow-lg text-center max-w-sm w-full mx-4">
-            <h3 class="text-xl font-bold mb-4 text-accent">Continue Session?</h3>
+    <div id="continueModal" class="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 hidden">
+        <div class="bg-white/95 dark:bg-surface/90 backdrop-blur-xl rounded-2xl p-6 shadow-2xl shadow-black/20 text-center max-w-sm w-full mx-4 border border-gray-200/30 dark:border-white/[0.08] ring-1 ring-white/5">
+            <h3 class="text-xl font-bold font-display mb-4 text-accent">Continue Session?</h3>
             <p class="mb-6 text-gray-700 dark:text-white">Would you like to continue with your previous cumulative
                 stats?</p>
             <div class="flex justify-center gap-4">
@@ -1174,23 +1131,23 @@
     </div>
 
     <!-- Settings Modal -->
-    <div id="settingsModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
-        <div class="bg-gray-50 dark:bg-gray-900 rounded-lg p-5 shadow-lg max-w-md w-full mx-4">
-            <h3 class="text-xl font-bold mb-3 text-accent flex items-center justify-center gap-2">
+    <div id="settingsModal" class="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 hidden">
+        <div class="bg-white/95 dark:bg-surface/90 backdrop-blur-xl rounded-2xl p-6 shadow-2xl shadow-black/20 max-w-md w-full mx-4 border border-gray-200/30 dark:border-white/[0.08] ring-1 ring-white/5">
+            <h3 class="text-xl font-bold font-display mb-3 text-accent flex items-center justify-center gap-2">
                 <i class="fas fa-cog"></i> Settings
             </h3>
             <!-- Tab selector -->
             <div class="grid grid-cols-4 gap-1 mb-4">
-                <button class="settings-tab-btn py-1 rounded text-xs font-semibold bg-sporty text-white"
+                <button class="settings-tab-btn py-1 rounded-lg text-xs font-semibold transition-all duration-150 bg-sporty text-white"
                     data-tab="profile">Profile</button>
                 <button
-                    class="settings-tab-btn py-1 rounded text-xs font-semibold bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300"
+                    class="settings-tab-btn py-1 rounded-lg text-xs font-semibold transition-all duration-150 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300"
                     data-tab="speeds">Speeds</button>
                 <button
-                    class="settings-tab-btn py-1 rounded text-xs font-semibold bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300"
+                    class="settings-tab-btn py-1 rounded-lg text-xs font-semibold transition-all duration-150 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300"
                     data-tab="integrations">Integrations</button>
                 <button
-                    class="settings-tab-btn py-1 rounded text-xs font-semibold bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300"
+                    class="settings-tab-btn py-1 rounded-lg text-xs font-semibold transition-all duration-150 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300"
                     data-tab="display">Display</button>
             </div>
             <!-- Tab content wrapper — min-h prevents modal resizing between tabs -->
@@ -1205,7 +1162,7 @@
                             <label for="weightInput"
                                 class="text-accent font-semibold text-sm w-28 text-right shrink-0">Weight (kg)</label>
                             <input id="weightInput" type="number" min="30" max="200" step="0.1" autocomplete="off"
-                                class="bg-gray-100 dark:bg-gray-900 text-gray-900 dark:text-white rounded px-2 py-1 w-24 border border-sporty text-center" />
+                                class="bg-gray-100/80 dark:bg-white/[0.04] text-gray-900 dark:text-white rounded-lg px-2 py-1.5 w-24 border border-sporty/40 focus:border-sporty focus:ring-1 focus:ring-sporty/30 text-center transition-all duration-150 outline-none" />
                         </div>
                         <div class="flex items-center gap-3">
                             <label class="text-accent font-semibold text-sm w-28 text-right shrink-0">Height</label>
@@ -1213,17 +1170,17 @@
                                 <div id="heightFtInInputs" class="flex items-center gap-1">
                                     <input id="heightFtInput" type="number" min="3" max="8" placeholder="5"
                                         autocomplete="off"
-                                        class="bg-gray-100 dark:bg-gray-900 text-gray-900 dark:text-white rounded px-2 py-1 w-14 border border-sporty text-center" />
+                                        class="bg-gray-100/80 dark:bg-white/[0.04] text-gray-900 dark:text-white rounded-lg px-2 py-1.5 w-14 border border-sporty/40 focus:border-sporty focus:ring-1 focus:ring-sporty/30 text-center transition-all duration-150 outline-none" />
                                     <span class="text-sm text-gray-500 dark:text-gray-400">ft</span>
                                     <input id="heightInInput" type="number" min="0" max="11" placeholder="11"
                                         autocomplete="off"
-                                        class="bg-gray-100 dark:bg-gray-900 text-gray-900 dark:text-white rounded px-2 py-1 w-14 border border-sporty text-center" />
+                                        class="bg-gray-100/80 dark:bg-white/[0.04] text-gray-900 dark:text-white rounded-lg px-2 py-1.5 w-14 border border-sporty/40 focus:border-sporty focus:ring-1 focus:ring-sporty/30 text-center transition-all duration-150 outline-none" />
                                     <span class="text-sm text-gray-500 dark:text-gray-400">in</span>
                                 </div>
                                 <div id="heightCmInputs" class="items-center gap-1 hidden">
                                     <input id="heightCmInput" type="number" min="90" max="250" placeholder="180"
                                         autocomplete="off"
-                                        class="bg-gray-100 dark:bg-gray-900 text-gray-900 dark:text-white rounded px-2 py-1 w-20 border border-sporty text-center" />
+                                        class="bg-gray-100/80 dark:bg-white/[0.04] text-gray-900 dark:text-white rounded-lg px-2 py-1.5 w-20 border border-sporty/40 focus:border-sporty focus:ring-1 focus:ring-sporty/30 text-center transition-all duration-150 outline-none" />
                                     <span class="text-sm text-gray-500 dark:text-gray-400">cm</span>
                                 </div>
                                 <div
@@ -1239,13 +1196,13 @@
                             <label for="ageInput"
                                 class="text-accent font-semibold text-sm w-28 text-right shrink-0">Age</label>
                             <input id="ageInput" type="number" min="10" max="120" autocomplete="off"
-                                class="bg-gray-100 dark:bg-gray-900 text-gray-900 dark:text-white rounded px-2 py-1 w-24 border border-sporty text-center" />
+                                class="bg-gray-100/80 dark:bg-white/[0.04] text-gray-900 dark:text-white rounded-lg px-2 py-1.5 w-24 border border-sporty/40 focus:border-sporty focus:ring-1 focus:ring-sporty/30 text-center transition-all duration-150 outline-none" />
                         </div>
                         <div class="flex items-center gap-3">
                             <label for="warmupDurationInput"
                                 class="text-accent font-semibold text-sm w-28 text-right shrink-0">Warm-up (min)</label>
                             <input id="warmupDurationInput" type="number" min="5" max="30" step="1" autocomplete="off"
-                                class="bg-gray-100 dark:bg-gray-900 text-gray-900 dark:text-white rounded px-2 py-1 w-24 border border-sporty text-center" />
+                                class="bg-gray-100/80 dark:bg-white/[0.04] text-gray-900 dark:text-white rounded-lg px-2 py-1.5 w-24 border border-sporty/40 focus:border-sporty focus:ring-1 focus:ring-sporty/30 text-center transition-all duration-150 outline-none" />
                             <span class="text-xs text-gray-400">5–30 min</span>
                         </div>
                     </div>
@@ -1258,35 +1215,35 @@
                         <div class="flex items-center justify-between gap-2">
                             <label class="text-accent font-semibold text-sm">Preset 1:</label>
                             <input id="speedPreset0" type="number" min="1" max="12" step="0.5"
-                                class="bg-gray-100 dark:bg-gray-900 text-gray-900 dark:text-white rounded px-2 py-1 w-20 border border-sporty text-center" />
+                                class="bg-gray-100/80 dark:bg-white/[0.04] text-gray-900 dark:text-white rounded-lg px-2 py-1.5 w-20 border border-sporty/40 focus:border-sporty focus:ring-1 focus:ring-sporty/30 text-center transition-all duration-150 outline-none" />
                         </div>
                         <div class="flex items-center justify-between gap-2">
                             <label class="text-accent font-semibold text-sm">Preset 2:</label>
                             <input id="speedPreset1" type="number" min="1" max="12" step="0.5"
-                                class="bg-gray-100 dark:bg-gray-900 text-gray-900 dark:text-white rounded px-2 py-1 w-20 border border-sporty text-center" />
+                                class="bg-gray-100/80 dark:bg-white/[0.04] text-gray-900 dark:text-white rounded-lg px-2 py-1.5 w-20 border border-sporty/40 focus:border-sporty focus:ring-1 focus:ring-sporty/30 text-center transition-all duration-150 outline-none" />
                         </div>
                         <div class="flex items-center justify-between gap-2">
                             <label class="text-accent font-semibold text-sm">Preset 3:</label>
                             <input id="speedPreset2" type="number" min="1" max="12" step="0.5"
-                                class="bg-gray-100 dark:bg-gray-900 text-gray-900 dark:text-white rounded px-2 py-1 w-20 border border-sporty text-center" />
+                                class="bg-gray-100/80 dark:bg-white/[0.04] text-gray-900 dark:text-white rounded-lg px-2 py-1.5 w-20 border border-sporty/40 focus:border-sporty focus:ring-1 focus:ring-sporty/30 text-center transition-all duration-150 outline-none" />
                         </div>
                         <div class="flex items-center justify-between gap-2">
                             <label class="text-accent font-semibold text-sm">Preset 4:</label>
                             <input id="speedPreset3" type="number" min="1" max="12" step="0.5"
-                                class="bg-gray-100 dark:bg-gray-900 text-gray-900 dark:text-white rounded px-2 py-1 w-20 border border-sporty text-center" />
+                                class="bg-gray-100/80 dark:bg-white/[0.04] text-gray-900 dark:text-white rounded-lg px-2 py-1.5 w-20 border border-sporty/40 focus:border-sporty focus:ring-1 focus:ring-sporty/30 text-center transition-all duration-150 outline-none" />
                         </div>
                         <div class="flex items-center justify-between gap-2">
                             <label class="text-accent font-semibold text-sm">Preset 5:</label>
                             <input id="speedPreset4" type="number" min="1" max="12" step="0.5"
-                                class="bg-gray-100 dark:bg-gray-900 text-gray-900 dark:text-white rounded px-2 py-1 w-20 border border-sporty text-center" />
+                                class="bg-gray-100/80 dark:bg-white/[0.04] text-gray-900 dark:text-white rounded-lg px-2 py-1.5 w-20 border border-sporty/40 focus:border-sporty focus:ring-1 focus:ring-sporty/30 text-center transition-all duration-150 outline-none" />
                         </div>
                         <div class="flex items-center justify-between gap-2">
                             <label class="text-accent font-semibold text-sm">Preset 6:</label>
                             <input id="speedPreset5" type="number" min="1" max="12" step="0.5"
-                                class="bg-gray-100 dark:bg-gray-900 text-gray-900 dark:text-white rounded px-2 py-1 w-20 border border-sporty text-center" />
+                                class="bg-gray-100/80 dark:bg-white/[0.04] text-gray-900 dark:text-white rounded-lg px-2 py-1.5 w-20 border border-sporty/40 focus:border-sporty focus:ring-1 focus:ring-sporty/30 text-center transition-all duration-150 outline-none" />
                         </div>
                     </div>
-                    <div class="mt-3 pt-3 border-t border-gray-200 dark:border-gray-700">
+                    <div class="mt-3 pt-3 border-t border-gray-200/50 dark:border-white/[0.06]">
                         <div id="speedResetConfirm" class="hidden flex items-center justify-between gap-2 h-8">
                             <span class="text-gray-500 dark:text-gray-400 text-xs">Reset all presets to defaults?</span>
                             <div class="flex gap-2">
@@ -1331,7 +1288,7 @@
                                 class="bg-red-500 hover:bg-red-600 text-white font-semibold py-1 px-3 rounded text-xs">Clear</button>
                         </div>
                     </div>
-                    <div class="border-t border-gray-200 dark:border-gray-700 pt-2 flex flex-col gap-2">
+                    <div class="border-t border-gray-200/50 dark:border-white/[0.06] pt-2 flex flex-col gap-2">
                         <!-- Field toggles -->
                         <div>
                             <p class="text-xs text-gray-500 dark:text-gray-400 mb-1.5">Fields to include in copied
@@ -1462,28 +1419,28 @@
             </div><!-- end tab content wrapper -->
             <div class="flex justify-center gap-4">
                 <button id="setDefaultsBtn"
-                    class="bg-sporty hover:bg-accent text-white font-semibold py-2 px-6 rounded shadow">Save</button>
+                    class="bg-gradient-cta hover:shadow-glow-md text-white font-bold py-2.5 px-6 rounded-xl shadow-glow-sm transition-all duration-200">Save</button>
                 <button id="closeSettingsBtn"
-                    class="bg-gray-400 hover:bg-gray-500 text-white font-semibold py-2 px-6 rounded shadow">Close</button>
+                    class="bg-gray-500/50 hover:bg-gray-500/70 text-white font-semibold py-2.5 px-6 rounded-xl border border-white/10 transition-all duration-200">Close</button>
             </div>
         </div>
     </div>
 
     <!-- Goals Modal -->
-    <div id="goalsModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
-        <div class="bg-gray-50 dark:bg-gray-900 rounded-lg p-5 shadow-lg max-w-sm w-full mx-4">
-            <h3 class="text-xl font-bold mb-3 text-accent flex items-center justify-center gap-2">
+    <div id="goalsModal" class="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 hidden">
+        <div class="bg-white/95 dark:bg-surface/90 backdrop-blur-xl rounded-2xl p-6 shadow-2xl shadow-black/20 max-w-sm w-full mx-4 border border-gray-200/30 dark:border-white/[0.08] ring-1 ring-white/5">
+            <h3 class="text-xl font-bold font-display mb-3 text-accent flex items-center justify-center gap-2">
                 <i class="fas fa-bullseye"></i> Goals
             </h3>
             <!-- Active days per week -->
-            <div class="flex items-center gap-3 mb-3 pb-3 border-b border-gray-200 dark:border-gray-700">
+            <div class="flex items-center gap-3 mb-3 pb-3 border-b border-gray-200/50 dark:border-white/[0.06]">
                 <span class="text-xs text-gray-500 whitespace-nowrap">Active days/week</span>
                 <input type="range" id="goalActiveDaysSlider" min="1" max="7" step="1" value="5"
                     class="flex-1 cursor-pointer accent-sky-500">
                 <span id="goalActiveDaysDisplay" class="text-sm font-bold text-sporty w-4 text-center">5</span>
             </div>
             <!-- Period goals reset -->
-            <div class="flex items-center justify-between mb-3 pb-3 border-b border-gray-200 dark:border-gray-700">
+            <div class="flex items-center justify-between mb-3 pb-3 border-b border-gray-200/50 dark:border-white/[0.06]">
                 <span class="text-xs text-gray-400 dark:text-gray-500">Period goals</span>
                 <button id="goalResetAllAuto"
                     class="flex items-center gap-1 text-xs text-sporty hover:text-sky-400 font-medium">
@@ -1492,28 +1449,28 @@
             </div>
             <!-- Period tab selector -->
             <div class="grid grid-cols-3 gap-1 mb-4">
-                <button class="goal-tab-btn py-1 rounded text-xs font-semibold bg-sporty text-white"
+                <button class="goal-tab-btn py-1 rounded-lg text-xs font-semibold transition-all duration-150 bg-sporty text-white"
                     data-tab="daily">Daily</button>
                 <button
-                    class="goal-tab-btn py-1 rounded text-xs font-semibold bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300"
+                    class="goal-tab-btn py-1 rounded-lg text-xs font-semibold transition-all duration-150 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300"
                     data-tab="weekly"><span
                         class="flex flex-col items-center gap-0.5 leading-none"><span>Weekly</span><span
                             class="goal-auto-pip w-1 h-1 rounded-full bg-sky-400"></span></span></button>
                 <button
-                    class="goal-tab-btn py-1 rounded text-xs font-semibold bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300"
+                    class="goal-tab-btn py-1 rounded-lg text-xs font-semibold transition-all duration-150 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300"
                     data-tab="monthly"><span
                         class="flex flex-col items-center gap-0.5 leading-none"><span>Monthly</span><span
                             class="goal-auto-pip w-1 h-1 rounded-full bg-sky-400"></span></span></button>
                 <button
-                    class="goal-tab-btn py-1 rounded text-xs font-semibold bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300"
+                    class="goal-tab-btn py-1 rounded-lg text-xs font-semibold transition-all duration-150 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300"
                     data-tab="threemonth"><span class="flex flex-col items-center gap-0.5 leading-none"><span>3
                             Mo</span><span class="goal-auto-pip w-1 h-1 rounded-full bg-sky-400"></span></span></button>
                 <button
-                    class="goal-tab-btn py-1 rounded text-xs font-semibold bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300"
+                    class="goal-tab-btn py-1 rounded-lg text-xs font-semibold transition-all duration-150 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300"
                     data-tab="sixmonth"><span class="flex flex-col items-center gap-0.5 leading-none"><span>6
                             Mo</span><span class="goal-auto-pip w-1 h-1 rounded-full bg-sky-400"></span></span></button>
                 <button
-                    class="goal-tab-btn py-1 rounded text-xs font-semibold bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300"
+                    class="goal-tab-btn py-1 rounded-lg text-xs font-semibold transition-all duration-150 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300"
                     data-tab="yearly"><span
                         class="flex flex-col items-center gap-0.5 leading-none"><span>Yearly</span><span
                             class="goal-auto-pip w-1 h-1 rounded-full bg-sky-400"></span></span></button>
@@ -1704,14 +1661,14 @@
             </div>
             <div class="flex justify-center">
                 <button id="closeGoalsBtn"
-                    class="bg-gray-400 hover:bg-gray-500 text-white font-semibold py-2 px-6 rounded shadow">Close</button>
+                    class="bg-gray-500/50 hover:bg-gray-500/70 text-white font-semibold py-2.5 px-6 rounded-xl border border-white/10 transition-all duration-200">Close</button>
             </div>
         </div>
     </div>
 
     <!-- Program Complete Toast -->
     <div id="programCompleteToast"
-        class="hidden fixed top-20 left-1/2 -translate-x-1/2 z-50 bg-green-600 text-white rounded-xl shadow-2xl px-5 py-3 items-center gap-3 border-2 border-green-400 animate-pulse">
+        class="hidden fixed top-20 left-1/2 -translate-x-1/2 z-50 bg-green-600/90 backdrop-blur-lg text-white rounded-2xl shadow-2xl shadow-green-500/20 px-5 py-3 items-center gap-3 border border-green-400/40 animate-pulse">
         <i class="fas fa-flag-checkered text-2xl"></i>
         <div>
             <div class="text-xs font-bold uppercase tracking-widest opacity-90">Program Complete</div>
@@ -1725,7 +1682,7 @@
 
     <!-- Startup Procedure Indicator -->
     <div id="startupIndicator"
-        class="hidden fixed bottom-16 md:bottom-4 left-1/2 -translate-x-1/2 z-50 bg-gray-900 text-white rounded-xl shadow-2xl px-4 py-3 min-w-[260px] border border-sporty pointer-events-none">
+        class="hidden fixed bottom-16 md:bottom-4 left-1/2 -translate-x-1/2 z-50 bg-surface/95 backdrop-blur-xl text-white rounded-2xl shadow-2xl shadow-black/30 px-4 py-3 min-w-[260px] border border-sporty/30 ring-1 ring-white/5 pointer-events-none">
         <div class="text-xs font-bold uppercase tracking-widest text-sporty mb-2 flex items-center gap-2">
             <i id="startupHeaderIcon" class="fas fa-circle-notch fa-spin"></i> Starting Up
         </div>

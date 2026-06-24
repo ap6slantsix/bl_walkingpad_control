@@ -553,11 +553,15 @@ function cancelProgram() {
     renderProgramPicker();
 }
 
-// Build a warm-up program dynamically from the user's preferred duration
-function buildWarmupProgram(durationMins) {
+// Build a warm-up program that ramps from a low floor up to just below the
+// target program's starting speed.  Three equal phases, each slightly faster.
+function buildWarmupProgram(durationMins, targetStartSpeed) {
     const totalSec = durationMins * 60;
     const phase = Math.floor(totalSec / 3);
     const rem   = totalSec - phase * 3;
+    const ceiling = Math.max(2.0, (targetStartSpeed || 3.5) - 0.5);
+    const floor   = Math.max(1.5, ceiling - 1.5);
+    const mid     = Math.round(((floor + ceiling) / 2) * 10) / 10;
     return {
         id:                 "_warmup",
         name:               `Warm-up (${durationMins} min)`,
@@ -566,9 +570,9 @@ function buildWarmupProgram(durationMins) {
         description:        "Pre-workout ramp-up",
         requiresRunningMode: false,
         steps: [
-            { name: "Easy Walk",   speed: 3.5, duration: phase },
-            { name: "Steady Walk", speed: 5.0, duration: phase },
-            { name: "Brisk Walk",  speed: 6.0, duration: phase + rem },
+            { name: "Easy Walk",     speed: floor,   duration: phase },
+            { name: "Moderate Walk", speed: mid,     duration: phase },
+            { name: "Warm-up Walk",  speed: ceiling, duration: phase + rem },
         ],
     };
 }
@@ -576,14 +580,14 @@ function buildWarmupProgram(durationMins) {
 // Launch program immediately (belt running) or queue it for when belt starts
 function launchOrQueueProgram(id) {
     const prog = WORKOUT_PROGRAMS.find((p) => p.id === id) || null;
-    if (!prog) return;
+    if (!prog) { console.warn("[LaunchProgram] program not found:", id); return; }
     if (!cFTMSControl && !isConnected) {
-        // No connection yet — show "not connected" indicator
+        console.warn("[LaunchProgram] not connected, showing indicator for:", id);
         showStartupIndicator(prog.steps[0].speed);
         return;
     }
     if (isRunning) {
-        // Belt already running — start immediately
+        console.log("[LaunchProgram] belt running, starting:", id);
         selectProgram(id);
         startProgram();
     } else {
@@ -599,10 +603,12 @@ function launchOrQueueProgram(id) {
 
 // Launch warm-up then chain to targetId
 function launchWarmup(targetId) {
+    console.log("[Warmup] launching, chain target:", targetId, "isRunning:", isRunning);
     warmupPromptActive = false;
     pendingProgramId = targetId;
-    const wu = buildWarmupProgram(warmupDurationMins);
-    // Patch warm-up into activeProgram directly (it's not in WORKOUT_PROGRAMS)
+    const targetProg = WORKOUT_PROGRAMS.find((p) => p.id === targetId);
+    const targetStartSpeed = targetProg?.steps?.[0]?.speed || 3.5;
+    const wu = buildWarmupProgram(warmupDurationMins, targetStartSpeed);
     activeProgram       = wu;
     programStepIndex    = 0;
     programStepElapsed  = 0;
@@ -610,16 +616,11 @@ function launchWarmup(targetId) {
     programCompletedFlag = false;
     programResuming     = false;
     if (!isRunning) {
-        // Belt not running — queue warm-up start
         pendingResumeSpeed = wu.steps[0].speed;
         ftmsCmd([0x07]);
         showStartupIndicator(wu.steps[0].speed);
-        // pendingProgramId is the *chained* target; the warm-up kicks off via
-        // applyPendingProgram() once the belt starts, but we've already set activeProgram.
-        // Clear pendingProgramId temporarily — it will be restored after warm-up finishes.
-        // Store the chain target in a separate flag and restore after warm-up.
-        pendingProgramId = targetId; // chain target remains set
-        programRunning = false;      // startProgram() will fire via applyPendingProgram
+        pendingProgramId = targetId;
+        programRunning = false;
     } else {
         startProgram();
     }
@@ -663,14 +664,18 @@ function tickProgram() {
             }
             const chainId = pendingProgramId;
             pendingProgramId = null;
+            console.log("[Program] complete:", activeProgram?.name, "chainId:", chainId, "isRunning:", isRunning);
             renderProgramSection();
             if (chainId && isRunning) {
                 // Auto-chain: warm-up → target program (3s transition)
+                console.log("[Program] chaining to", chainId, "in 3s");
                 programCompleteBannerTimer = setTimeout(() => {
                     programCompletedFlag = false;
+                    console.log("[Program] chain firing →", chainId, "isRunning:", isRunning, "isConnected:", isConnected);
                     launchOrQueueProgram(chainId);
                 }, 3000);
             } else {
+                console.log("[Program] no chain — chainId:", chainId, "isRunning:", isRunning);
                 programCompleteBannerTimer = setTimeout(() => {
                     if (!programRunning) {
                         programCompletedFlag = false;
@@ -699,7 +704,7 @@ function updateProgramStartBtnState() {
     if (!btn) return;
     // Button enabled whenever a program is selected and not actively running
     // (it now handles belt auto-start itself)
-    const canStart = !!activeProgram && !programRunning;
+    const canStart = !!activeProgram && !programRunning && !warmupPromptActive;
     btn.disabled = !canStart;
     btn.classList.toggle("opacity-40", !canStart);
     btn.classList.toggle("cursor-not-allowed", !canStart);
@@ -1117,16 +1122,21 @@ function handleFTMSTreadmill(event) {
             dismissStartupIndicator();
             // If a program was queued for auto-start, kick it off now
             if (activeProgram && activeProgram.id === "_warmup" && chainId) {
+                console.log("[Startup] warmup detected, restoring chain:", chainId);
                 pendingProgramId = chainId;
                 startProgram();
             } else if (chainId && activeProgram && activeProgram.id === chainId) {
+                console.log("[Startup] starting queued program:", chainId);
                 startProgram();
+            } else if (chainId) {
+                console.warn("[Startup] chain target lost — chainId:", chainId, "activeProgram:", activeProgram?.id);
             }
         }, BELT_SPEED_SET_DELAY_MS);
     }
 
     currentSpeed = speed;
     if (currentSpeed > 0 && currentSpeed <= MAX_REALISTIC_SPEED) {
+        lastSpeed = currentSpeed;
         if (currentSpeed > maxSpeed) maxSpeed = currentSpeed;
         if (currentSpeed > deltaMaxSpeed) deltaMaxSpeed = currentSpeed;
         speedSum += currentSpeed;
@@ -1892,17 +1902,18 @@ const DEFAULT_SPEED_PRESETS = [3.5, 4.5, 5.5, 6.5, 7.5, 8.5];
 function applySpeedPresets(presets) {
     presets.forEach((speed, i) => {
         const label = speed % 1 === 0 ? speed.toFixed(1) : speed.toString();
+        const html = `<i class="fas fa-gauge-simple-high text-xs"></i> ${label}`;
         const desktop = document.getElementById(`presetBtn${i}`);
         const mobile = document.getElementById(`presetBtn${i}M`);
         if (desktop) {
-            desktop.textContent = label;
+            desktop.innerHTML = html;
             desktop.onclick = () => {
                 haptic(30);
                 startAndSetSpeed(speed);
             };
         }
         if (mobile) {
-            mobile.textContent = label;
+            mobile.innerHTML = html;
             mobile.onclick = () => {
                 haptic(30);
                 startAndSetSpeed(speed);
@@ -3882,6 +3893,20 @@ document.getElementById("speedUpBtn").addEventListener("click", () => {
     ftmsCmd(ftmsSpeedBytes(lastSpeed));
 });
 
+document.getElementById("speedDownSmallBtn").addEventListener("click", () => {
+    haptic(20);
+    lastSpeed = Math.max(1.0, Math.round(lastSpeed * 10 - 1) / 10);
+    if (programRunning) programUserOverride = true;
+    ftmsCmd(ftmsSpeedBytes(lastSpeed));
+});
+
+document.getElementById("speedUpSmallBtn").addEventListener("click", () => {
+    haptic(20);
+    lastSpeed = Math.min(12.0, Math.round(lastSpeed * 10 + 1) / 10);
+    if (programRunning) programUserOverride = true;
+    ftmsCmd(ftmsSpeedBytes(lastSpeed));
+});
+
 function startAndSetSpeed(targetSpeed) {
     if (!isRunning && !cFTMSControl) {
         showStartupIndicator(targetSpeed);
@@ -4894,6 +4919,16 @@ document
     .getElementById("speedUpBtnM")
     .addEventListener("click", () =>
         document.getElementById("speedUpBtn").click(),
+    );
+document
+    .getElementById("speedDownSmallBtnM")
+    .addEventListener("click", () =>
+        document.getElementById("speedDownSmallBtn").click(),
+    );
+document
+    .getElementById("speedUpSmallBtnM")
+    .addEventListener("click", () =>
+        document.getElementById("speedUpSmallBtn").click(),
     );
 // Preset buttons are wired dynamically via applySpeedPresets() called from loadDefaults()
 
