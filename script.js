@@ -560,7 +560,7 @@ function buildWarmupProgram(durationMins, targetStartSpeed) {
     const phase = Math.floor(totalSec / 3);
     const rem   = totalSec - phase * 3;
     const ceiling = Math.max(2.0, (targetStartSpeed || 3.5) - 0.5);
-    const floor   = Math.max(1.5, ceiling - 1.5);
+    const floor   = Math.max(2.0, ceiling - 1.5);
     const mid     = Math.round(((floor + ceiling) / 2) * 10) / 10;
     return {
         id:                 "_warmup",
@@ -655,10 +655,10 @@ function tickProgram() {
             haptic([100, 50, 100, 50, 200]);
             padBeepAlert();
             showProgramCompleteToast(activeProgram?.name);
-            // Cooldown: drop belt to 1.0 km/h so user can step off safely.
+            // Ease down to 3.0 km/h so user can keep walking or stop manually.
             // Skip if auto-chaining — the next program will set its own speed.
             if (!pendingProgramId) {
-                const cooldownSpeed = 1.0;
+                const cooldownSpeed = 3.0;
                 lastSpeed = cooldownSpeed;
                 setTimeout(() => ftmsCmd(ftmsSpeedBytes(cooldownSpeed)), 400);
             }
